@@ -1,6 +1,6 @@
 /**
  * Social Scheduler Handler
- * Triggered by EventBridge every 2.5 hours (150 minutes).
+ * Triggered by EventBridge every 35 minutes.
  * Picks the next queued post and publishes to all active platforms.
  */
 
