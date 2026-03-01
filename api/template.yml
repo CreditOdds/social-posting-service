@@ -45,6 +45,15 @@ Parameters:
     Type: String
     Description: Twitter access token secret
     NoEcho: true
+  FACEBOOKPAGEID:
+    Type: String
+    Description: Facebook Page ID
+    Default: ''
+  FACEBOOKPAGEACCESSTOKEN:
+    Type: String
+    Description: Facebook Page Access Token (long-lived)
+    NoEcho: true
+    Default: ''
 
 Resources:
   # S3 Bucket for social media images
@@ -172,6 +181,8 @@ Resources:
           TWITTER_API_SECRET: !Ref TWITTERAPISECRET
           TWITTER_ACCESS_TOKEN: !Ref TWITTERACCESSTOKEN
           TWITTER_ACCESS_TOKEN_SECRET: !Ref TWITTERACCESSTOKENSECRET
+          FACEBOOK_PAGE_ID: !Ref FACEBOOKPAGEID
+          FACEBOOK_PAGE_ACCESS_TOKEN: !Ref FACEBOOKPAGEACCESSTOKEN
       Events:
         ScheduleRule:
           Type: Schedule
