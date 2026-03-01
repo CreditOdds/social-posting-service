@@ -1,0 +1,9 @@
+node_modules/
+.next/
+.aws-sam/
+.env
+.env.local
+.env.*.local
+*.js.map
+dist/
+build/

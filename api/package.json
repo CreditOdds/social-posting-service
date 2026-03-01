@@ -1,0 +1,14 @@
+{
+  "name": "@creditodds/social-api",
+  "description": "CreditOdds Social Media Posting Service - AWS Lambda backend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "aws-sdk": "^2.799.0",
+    "firebase-admin": "^13.6.0",
+    "mysql2": "^3.16.2",
+    "serverless-mysql": "^1.5.4",
+    "twitter-api-v2": "^1.19.0",
+    "snoowrap": "^1.23.0"
+  }
+}

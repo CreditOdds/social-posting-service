@@ -1,0 +1,11 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "CreditOddsSocialPostingService"
+s3_bucket = "codepipeline-us-east-2-534542813767"
+s3_prefix = "CreditOddsSocialPostingService"
+region = "us-east-2"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+disable_rollback = true

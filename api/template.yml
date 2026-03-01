@@ -1,0 +1,319 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CreditOdds Social Media Posting Service
+
+Transform:
+- AWS::Serverless-2016-10-31
+
+Parameters:
+  ENDPOINT:
+    Type: String
+    Description: MySQL database endpoint
+    NoEcho: true
+  DATABASE:
+    Type: String
+    Description: MySQL database name
+    NoEcho: true
+  USERNAME:
+    Type: String
+    Description: MySQL database username
+    NoEcho: true
+  PASSWORD:
+    Type: String
+    Description: MySQL database password
+    NoEcho: true
+  ANTHROPICAPIKEY:
+    Type: String
+    Description: Anthropic API key for Claude Haiku
+    NoEcho: true
+  SOCIALAPIKEY:
+    Type: String
+    Description: API key for CI/CD queue endpoint
+    NoEcho: true
+  TWITTERAPIKEY:
+    Type: String
+    Description: Twitter API key
+    NoEcho: true
+  TWITTERAPISECRET:
+    Type: String
+    Description: Twitter API secret
+    NoEcho: true
+  TWITTERACCESSTOKEN:
+    Type: String
+    Description: Twitter access token
+    NoEcho: true
+  TWITTERACCESSTOKENSECRET:
+    Type: String
+    Description: Twitter access token secret
+    NoEcho: true
+
+Resources:
+  # S3 Bucket for social media images
+  SocialImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: creditodds-social-images
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [PUT]
+            AllowedOrigins: ['https://social.creditodds.com', 'http://localhost:3000']
+            MaxAge: 300
+
+  # CloudFront for image CDN
+  SocialImagesCDN:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !GetAtt SocialImagesBucket.RegionalDomainName
+            Id: S3Origin
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        Enabled: true
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            QueryString: false
+        PriceClass: PriceClass_100
+
+  # Firebase Token Authorizer
+  FirebaseAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/firebase-authorizer.firebaseAuthorizerHandler
+      Runtime: nodejs18.x
+      MemorySize: 128
+      Timeout: 10
+      Environment:
+        Variables:
+          FIREBASE_PROJECT_ID: creditodds
+
+  # API Gateway
+  SocialPostingAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        DefaultAuthorizer: FirebaseAuthorizer
+        Authorizers:
+          FirebaseAuthorizer:
+            FunctionArn: !GetAtt FirebaseAuthorizerFunction.Arn
+            FunctionPayloadType: TOKEN
+            Identity:
+              Header: Authorization
+              ReauthorizeEvery: 300
+
+  # --- Lambda Functions ---
+
+  SocialPostsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/social-posts.handler
+      Runtime: nodejs18.x
+      MemorySize: 128
+      Timeout: 30
+      Description: CRUD operations for social media posts
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          DATABASE: !Ref DATABASE
+          USERNAME: !Ref USERNAME
+          PASSWORD: !Ref PASSWORD
+      Events:
+        GetPosts:
+          Type: Api
+          Properties:
+            Path: /social/posts
+            Method: GET
+            RestApiId: !Ref SocialPostingAPI
+        CreatePost:
+          Type: Api
+          Properties:
+            Path: /social/posts
+            Method: POST
+            RestApiId: !Ref SocialPostingAPI
+        UpdatePost:
+          Type: Api
+          Properties:
+            Path: /social/posts
+            Method: PUT
+            RestApiId: !Ref SocialPostingAPI
+        DeletePost:
+          Type: Api
+          Properties:
+            Path: /social/posts
+            Method: DELETE
+            RestApiId: !Ref SocialPostingAPI
+        PostsOptions:
+          Type: Api
+          Properties:
+            Path: /social/posts
+            Method: OPTIONS
+            RestApiId: !Ref SocialPostingAPI
+            Auth:
+              Authorizer: NONE
+
+  SocialSchedulerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/social-scheduler.handler
+      Runtime: nodejs18.x
+      MemorySize: 256
+      Timeout: 120
+      Description: Scheduled post publisher - triggered every 2.5 hours
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          DATABASE: !Ref DATABASE
+          USERNAME: !Ref USERNAME
+          PASSWORD: !Ref PASSWORD
+          TWITTER_API_KEY: !Ref TWITTERAPIKEY
+          TWITTER_API_SECRET: !Ref TWITTERAPISECRET
+          TWITTER_ACCESS_TOKEN: !Ref TWITTERACCESSTOKEN
+          TWITTER_ACCESS_TOKEN_SECRET: !Ref TWITTERACCESSTOKENSECRET
+      Events:
+        ScheduleRule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(150 minutes)
+            Description: Post next queued social media post every 2.5 hours
+            Enabled: true
+
+  SocialAccountsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/social-accounts.handler
+      Runtime: nodejs18.x
+      MemorySize: 128
+      Timeout: 30
+      Description: Platform account management
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          DATABASE: !Ref DATABASE
+          USERNAME: !Ref USERNAME
+          PASSWORD: !Ref PASSWORD
+      Events:
+        GetAccounts:
+          Type: Api
+          Properties:
+            Path: /social/accounts
+            Method: GET
+            RestApiId: !Ref SocialPostingAPI
+        UpdateAccount:
+          Type: Api
+          Properties:
+            Path: /social/accounts
+            Method: PUT
+            RestApiId: !Ref SocialPostingAPI
+        AccountsOptions:
+          Type: Api
+          Properties:
+            Path: /social/accounts
+            Method: OPTIONS
+            RestApiId: !Ref SocialPostingAPI
+            Auth:
+              Authorizer: NONE
+
+  SocialGenerateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/social-generate.handler
+      Runtime: nodejs18.x
+      MemorySize: 128
+      Timeout: 30
+      Description: Generate social media post text using Claude Haiku
+      Environment:
+        Variables:
+          ANTHROPIC_API_KEY: !Ref ANTHROPICAPIKEY
+      Events:
+        Generate:
+          Type: Api
+          Properties:
+            Path: /social/generate
+            Method: POST
+            RestApiId: !Ref SocialPostingAPI
+        GenerateOptions:
+          Type: Api
+          Properties:
+            Path: /social/generate
+            Method: OPTIONS
+            RestApiId: !Ref SocialPostingAPI
+            Auth:
+              Authorizer: NONE
+
+  SocialUploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/social-upload.handler
+      Runtime: nodejs18.x
+      MemorySize: 128
+      Timeout: 10
+      Description: Generate presigned S3 URLs for image upload
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref SocialImagesBucket
+          CDN_DOMAIN: !GetAtt SocialImagesCDN.DomainName
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref SocialImagesBucket
+      Events:
+        Upload:
+          Type: Api
+          Properties:
+            Path: /social/upload
+            Method: POST
+            RestApiId: !Ref SocialPostingAPI
+        UploadOptions:
+          Type: Api
+          Properties:
+            Path: /social/upload
+            Method: OPTIONS
+            RestApiId: !Ref SocialPostingAPI
+            Auth:
+              Authorizer: NONE
+
+  SocialQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/social-queue.handler
+      Runtime: nodejs18.x
+      MemorySize: 128
+      Timeout: 10
+      Description: Queue posts from CI/CD (API-key auth, no Firebase)
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          DATABASE: !Ref DATABASE
+          USERNAME: !Ref USERNAME
+          PASSWORD: !Ref PASSWORD
+          SOCIAL_API_KEY: !Ref SOCIALAPIKEY
+      Events:
+        QueuePost:
+          Type: Api
+          Properties:
+            Path: /social/queue
+            Method: POST
+            RestApiId: !Ref SocialPostingAPI
+            Auth:
+              Authorizer: NONE
+        QueueOptions:
+          Type: Api
+          Properties:
+            Path: /social/queue
+            Method: OPTIONS
+            RestApiId: !Ref SocialPostingAPI
+            Auth:
+              Authorizer: NONE
+
+Outputs:
+  SocialPostingAPIUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${SocialPostingAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  SocialImagesBucketName:
+    Description: S3 bucket for social images
+    Value: !Ref SocialImagesBucket
+  SocialImagesCDNDomain:
+    Description: CloudFront domain for social images
+    Value: !GetAtt SocialImagesCDN.DomainName

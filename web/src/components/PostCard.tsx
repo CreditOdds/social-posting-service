@@ -1,0 +1,104 @@
+'use client';
+
+import { SocialPost } from '@/lib/api';
+import StatusBadge from './StatusBadge';
+import PlatformBadge from './PlatformBadge';
+
+interface PostCardProps {
+  post: SocialPost;
+  onEdit?: (post: SocialPost) => void;
+  onDelete?: (post: SocialPost) => void;
+  onQueue?: (post: SocialPost) => void;
+  onRetry?: (post: SocialPost) => void;
+}
+
+export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: PostCardProps) {
+  const canEdit = ['draft', 'queued', 'failed'].includes(post.status);
+  const canQueue = post.status === 'draft';
+  const canRetry = post.status === 'failed';
+  const canDelete = post.status !== 'posting';
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-2">
+            <StatusBadge status={post.status} />
+            <span className="text-xs text-gray-500">
+              {new Date(post.created_at).toLocaleString()}
+            </span>
+            {post.source_type !== 'manual' && (
+              <span className="text-xs text-gray-400">
+                via {post.source_type}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-gray-900 whitespace-pre-wrap">{post.text_content}</p>
+          {post.link_url && (
+            <a href={post.link_url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:underline mt-1 block truncate">
+              {post.link_url}
+            </a>
+          )}
+          {post.image_url && (
+            <div className="mt-2">
+              <img src={post.image_url} alt="" className="h-20 rounded border border-gray-200 object-cover" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Platform targets */}
+      {post.platforms && post.platforms.length > 0 && (
+        <div className="flex gap-1 mt-3">
+          {post.platforms.map(p => <PlatformBadge key={p} platform={p} />)}
+        </div>
+      )}
+
+      {/* Results (if posted or failed) */}
+      {post.results && post.results.length > 0 && (
+        <div className="mt-3 border-t pt-3 space-y-1">
+          {post.results.map(r => (
+            <div key={r.id} className="flex items-center gap-2 text-xs">
+              <PlatformBadge platform={r.platform} />
+              <StatusBadge status={r.status} />
+              {r.platform_post_url && (
+                <a href={r.platform_post_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline truncate">
+                  View
+                </a>
+              )}
+              {r.error_message && (
+                <span className="text-red-500 truncate" title={r.error_message}>
+                  {r.error_message}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-2 mt-3 pt-3 border-t">
+        {canEdit && onEdit && (
+          <button onClick={() => onEdit(post)} className="text-xs text-gray-600 hover:text-gray-900">
+            Edit
+          </button>
+        )}
+        {canQueue && onQueue && (
+          <button onClick={() => onQueue(post)} className="text-xs text-indigo-600 hover:text-indigo-800">
+            Queue
+          </button>
+        )}
+        {canRetry && onRetry && (
+          <button onClick={() => onRetry(post)} className="text-xs text-orange-600 hover:text-orange-800">
+            Retry
+          </button>
+        )}
+        {canDelete && onDelete && (
+          <button onClick={() => onDelete(post)} className="text-xs text-red-600 hover:text-red-800">
+            Delete
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
