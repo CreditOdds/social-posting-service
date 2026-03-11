@@ -17,6 +17,11 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
   const canQueue = post.status === 'draft';
   const canRetry = post.status === 'failed';
   const canDelete = post.status !== 'posting';
+  const scheduledAt = post.scheduled_at ? new Date(post.scheduled_at) : null;
+  const scheduledLocal = scheduledAt ? scheduledAt.toLocaleString() : 'ASAP';
+  const scheduledUtc = scheduledAt
+    ? `${scheduledAt.toISOString().replace('T', ' ').replace('Z', ' UTC')}`
+    : null;
   const minGapLabel = post.min_gap_minutes
     ? post.min_gap_minutes % 60 === 0
       ? `${post.min_gap_minutes / 60}h`
@@ -29,6 +34,9 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
             <StatusBadge status={post.status} />
+            <span className="text-xs rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-indigo-700">
+              P{post.priority}
+            </span>
             <span className="text-xs text-gray-500">
               {new Date(post.created_at).toLocaleString()}
             </span>
@@ -37,6 +45,10 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
                 via {post.source_type}
               </span>
             )}
+          </div>
+          <div className="text-xs text-gray-500 mb-2">
+            Scheduled: {scheduledLocal}
+            {scheduledUtc && <span> · {scheduledUtc}</span>}
           </div>
           <p className="text-sm text-gray-900 whitespace-pre-wrap">{post.text_content}</p>
           {(post.priority !== 0 || post.queue_group || post.min_gap_minutes) && (
