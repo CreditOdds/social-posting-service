@@ -10,6 +10,7 @@ const navLinks = [
   { href: '/compose', label: 'Compose' },
   { href: '/history', label: 'History' },
   { href: '/accounts', label: 'Accounts' },
+  { href: '/settings', label: 'Settings' },
 ];
 
 export default function NavBar() {

@@ -9,6 +9,8 @@
 const mysql = require('../lib/db');
 const { isAdmin, getUserId } = require('../lib/admin-check');
 const { success, error, options } = require('../lib/response');
+const { loadSettings } = require('../lib/settings');
+const { isInBlackout, advanceToNextAllowedTick } = require('../lib/blackout');
 
 const SCHEDULER_INTERVAL_MINUTES = 35;
 
@@ -70,10 +72,10 @@ function computeEligibleAt(post, lastPostedByGroup, now) {
   return eligibleAt;
 }
 
-function estimateQueuedPosts(posts, lastPostedByGroup) {
+function estimateQueuedPosts(posts, lastPostedByGroup, blackout) {
   const now = new Date();
   const intervalMs = SCHEDULER_INTERVAL_MINUTES * 60_000;
-  let tick = ceilToInterval(now, intervalMs);
+  let tick = advanceToNextAllowedTick(ceilToInterval(now, intervalMs), intervalMs, blackout);
   const remaining = posts.filter(p => p.status === 'queued');
   const estimates = new Map();
   const lastPosted = new Map(lastPostedByGroup);
@@ -94,7 +96,7 @@ function estimateQueuedPosts(posts, lastPostedByGroup) {
 
     if (candidates.length === 0) {
       if (!earliestEligible) break;
-      tick = ceilToInterval(earliestEligible, intervalMs);
+      tick = advanceToNextAllowedTick(ceilToInterval(earliestEligible, intervalMs), intervalMs, blackout);
       continue;
     }
 
@@ -113,7 +115,7 @@ function estimateQueuedPosts(posts, lastPostedByGroup) {
       break;
     }
 
-    tick = new Date(tick.getTime() + intervalMs);
+    tick = advanceToNextAllowedTick(new Date(tick.getTime() + intervalMs), intervalMs, blackout);
   }
 
   return estimates;
@@ -184,7 +186,9 @@ async function handleGet(event) {
 
     const needsQueueEstimates = posts.some(p => p.status === 'queued');
     let lastPostedByGroup = new Map();
+    let settings = null;
     if (needsQueueEstimates) {
+      settings = await loadSettings(mysql);
       const lastPostedRows = await mysql.query(`
         SELECT queue_group, MAX(posted_at) AS last_posted_at
         FROM social_posts
@@ -209,7 +213,7 @@ async function handleGet(event) {
     }));
 
     const estimatedTimes = needsQueueEstimates
-      ? estimateQueuedPosts(parsedPosts, lastPostedByGroup)
+      ? estimateQueuedPosts(parsedPosts, lastPostedByGroup, settings?.blackout)
       : new Map();
 
     const withEstimates = parsedPosts.map(post => ({

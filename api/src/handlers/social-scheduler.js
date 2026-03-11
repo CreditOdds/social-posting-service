@@ -8,6 +8,8 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const mysql = require('../lib/db');
+const { loadSettings } = require('../lib/settings');
+const { isInBlackout } = require('../lib/blackout');
 
 // Platform modules
 const twitter = require('../lib/platforms/twitter');
@@ -22,6 +24,13 @@ exports.handler = async (event) => {
   console.log('Scheduler triggered:', JSON.stringify(event));
 
   try {
+    const settings = await loadSettings(mysql);
+    if (isInBlackout(new Date(), settings.blackout)) {
+      console.log('Blackout window active; skipping post publish.');
+      await mysql.end();
+      return { statusCode: 200, body: 'Blackout window active' };
+    }
+
     // 1. Get the next queued post (atomically lock it)
     const lockResult = await mysql.query(`
       UPDATE social_posts p
