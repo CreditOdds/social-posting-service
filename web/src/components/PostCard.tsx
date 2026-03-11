@@ -17,6 +17,11 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
   const canQueue = post.status === 'draft';
   const canRetry = post.status === 'failed';
   const canDelete = post.status !== 'posting';
+  const minGapLabel = post.min_gap_minutes
+    ? post.min_gap_minutes % 60 === 0
+      ? `${post.min_gap_minutes / 60}h`
+      : `${post.min_gap_minutes}m`
+    : null;
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
@@ -34,6 +39,13 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
             )}
           </div>
           <p className="text-sm text-gray-900 whitespace-pre-wrap">{post.text_content}</p>
+          {(post.priority !== 0 || post.queue_group || post.min_gap_minutes) && (
+            <div className="mt-2 text-xs text-gray-500">
+              <span>Priority {post.priority}</span>
+              {post.queue_group && <span> · Group {post.queue_group}</span>}
+              {minGapLabel && <span> · Min gap {minGapLabel}</span>}
+            </div>
+          )}
           {post.link_url && (
             <a href={post.link_url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:underline mt-1 block truncate">
               {post.link_url}

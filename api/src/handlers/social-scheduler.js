@@ -24,11 +24,23 @@ exports.handler = async (event) => {
   try {
     // 1. Get the next queued post (atomically lock it)
     const lockResult = await mysql.query(`
-      UPDATE social_posts
-      SET status = 'posting'
-      WHERE status = 'queued'
-        AND (scheduled_at IS NULL OR scheduled_at <= NOW())
-      ORDER BY scheduled_at ASC, created_at ASC
+      UPDATE social_posts p
+      LEFT JOIN (
+        SELECT queue_group, MAX(posted_at) AS last_posted_at
+        FROM social_posts
+        WHERE status = 'posted' AND queue_group IS NOT NULL
+        GROUP BY queue_group
+      ) last_posted ON last_posted.queue_group = p.queue_group
+      SET p.status = 'posting'
+      WHERE p.status = 'queued'
+        AND (p.scheduled_at IS NULL OR p.scheduled_at <= NOW())
+        AND (
+          p.min_gap_minutes IS NULL
+          OR p.queue_group IS NULL
+          OR last_posted.last_posted_at IS NULL
+          OR last_posted.last_posted_at <= DATE_SUB(NOW(), INTERVAL p.min_gap_minutes MINUTE)
+        )
+      ORDER BY p.priority DESC, p.scheduled_at ASC, p.created_at ASC
       LIMIT 1
     `);
 
