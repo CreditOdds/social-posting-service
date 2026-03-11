@@ -31,16 +31,17 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: 'Blackout window active' };
     }
 
-    // 1. Get the next queued post (atomically lock it)
-    const lockResult = await mysql.query(`
-      UPDATE social_posts p
+    // MySQL rejects UPDATE ... JOIN ... ORDER BY ... LIMIT in this environment,
+    // so first select the next eligible post, then claim it by id.
+    const [nextPost] = await mysql.query(`
+      SELECT p.id
+      FROM social_posts p
       LEFT JOIN (
         SELECT queue_group, MAX(posted_at) AS last_posted_at
         FROM social_posts
         WHERE status = 'posted' AND queue_group IS NOT NULL
         GROUP BY queue_group
       ) last_posted ON last_posted.queue_group = p.queue_group
-      SET p.status = 'posting'
       WHERE p.status = 'queued'
         AND (p.scheduled_at IS NULL OR p.scheduled_at <= NOW())
         AND (
@@ -53,15 +54,27 @@ exports.handler = async (event) => {
       LIMIT 1
     `);
 
-    if (lockResult.affectedRows === 0) {
+    if (!nextPost) {
       console.log('No queued posts to process');
       await mysql.end();
       return { statusCode: 200, body: 'No posts to process' };
     }
 
+    const lockResult = await mysql.query(
+      "UPDATE social_posts SET status = 'posting' WHERE id = ? AND status = 'queued'",
+      [nextPost.id]
+    );
+
+    if (lockResult.affectedRows === 0) {
+      console.log(`Post ${nextPost.id} was claimed by another invocation`);
+      await mysql.end();
+      return { statusCode: 200, body: 'Post already claimed' };
+    }
+
     // 2. Fetch the locked post
     const [post] = await mysql.query(
-      "SELECT * FROM social_posts WHERE status = 'posting' ORDER BY updated_at DESC LIMIT 1"
+      'SELECT * FROM social_posts WHERE id = ?',
+      [nextPost.id]
     );
 
     if (!post) {

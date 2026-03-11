@@ -354,6 +354,30 @@ Resources:
             Auth:
               Authorizer: NONE
 
+  SocialSchedulerErrorMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${SocialSchedulerFunction}"
+      FilterPattern: '"Scheduler error:"'
+      MetricTransformations:
+        - MetricNamespace: CreditOdds/SocialPosting
+          MetricName: SocialSchedulerErrors
+          MetricValue: "1"
+
+  SocialSchedulerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-SocialSchedulerErrors"
+      AlarmDescription: Alarm when the social scheduler logs repeated errors.
+      Namespace: CreditOdds/SocialPosting
+      MetricName: SocialSchedulerErrors
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
 Outputs:
   SocialPostingAPIUrl:
     Description: API Gateway endpoint URL
