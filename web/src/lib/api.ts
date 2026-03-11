@@ -30,6 +30,7 @@ export interface SocialPost {
   priority: number;
   queue_group: string | null;
   min_gap_minutes: number | null;
+  estimated_post_at: string | null;
   scheduled_at: string | null;
   posted_at: string | null;
   platforms: string[] | null;

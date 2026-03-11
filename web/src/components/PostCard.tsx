@@ -17,6 +17,11 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
   const canQueue = post.status === 'draft';
   const canRetry = post.status === 'failed';
   const canDelete = post.status !== 'posting';
+  const estimatedAt = post.estimated_post_at ? new Date(post.estimated_post_at) : null;
+  const estimatedLocal = estimatedAt ? estimatedAt.toLocaleString() : null;
+  const estimatedUtc = estimatedAt
+    ? `${estimatedAt.toISOString().replace('T', ' ').replace('Z', ' UTC')}`
+    : null;
   const scheduledAt = post.scheduled_at ? new Date(post.scheduled_at) : null;
   const scheduledLocal = scheduledAt ? scheduledAt.toLocaleString() : 'ASAP';
   const scheduledUtc = scheduledAt
@@ -47,8 +52,17 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
             )}
           </div>
           <div className="text-xs text-gray-500 mb-2">
-            Scheduled: {scheduledLocal}
-            {scheduledUtc && <span> · {scheduledUtc}</span>}
+            {post.status === 'queued' && estimatedLocal ? (
+              <>
+                Estimated: {estimatedLocal}
+                {estimatedUtc && <span> · {estimatedUtc}</span>}
+              </>
+            ) : (
+              <>
+                Scheduled: {scheduledLocal}
+                {scheduledUtc && <span> · {scheduledUtc}</span>}
+              </>
+            )}
           </div>
           <p className="text-sm text-gray-900 whitespace-pre-wrap">{post.text_content}</p>
           {(post.priority !== 0 || post.queue_group || post.min_gap_minutes) && (

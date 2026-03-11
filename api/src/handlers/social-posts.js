@@ -10,6 +10,8 @@ const mysql = require('../lib/db');
 const { isAdmin, getUserId } = require('../lib/admin-check');
 const { success, error, options } = require('../lib/response');
 
+const SCHEDULER_INTERVAL_MINUTES = 35;
+
 function parseOptionalInt(value, fieldName) {
   if (value === undefined) return { provided: false };
   if (value === null || value === '') return { provided: true, value: null };
@@ -25,6 +27,96 @@ function normalizeQueueGroup(value) {
   if (value === null) return { provided: true, value: null };
   const trimmed = String(value).trim();
   return { provided: true, value: trimmed.length > 0 ? trimmed : null };
+}
+
+function toDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function ceilToInterval(date, intervalMs) {
+  return new Date(Math.ceil(date.getTime() / intervalMs) * intervalMs);
+}
+
+function compareQueueOrder(a, b) {
+  if (a.priority !== b.priority) return b.priority - a.priority;
+  const aScheduled = toDate(a.scheduled_at);
+  const bScheduled = toDate(b.scheduled_at);
+  const aScheduledMs = aScheduled ? aScheduled.getTime() : 0;
+  const bScheduledMs = bScheduled ? bScheduled.getTime() : 0;
+  if (aScheduledMs !== bScheduledMs) return aScheduledMs - bScheduledMs;
+  const aCreated = toDate(a.created_at);
+  const bCreated = toDate(b.created_at);
+  return (aCreated ? aCreated.getTime() : 0) - (bCreated ? bCreated.getTime() : 0);
+}
+
+function computeEligibleAt(post, lastPostedByGroup, now) {
+  let eligibleAt = now;
+  const scheduledAt = toDate(post.scheduled_at);
+  if (scheduledAt && scheduledAt > eligibleAt) {
+    eligibleAt = scheduledAt;
+  }
+  if (post.queue_group && post.min_gap_minutes != null) {
+    const lastPosted = lastPostedByGroup.get(post.queue_group);
+    if (lastPosted) {
+      const gapAt = new Date(lastPosted.getTime() + post.min_gap_minutes * 60_000);
+      if (gapAt > eligibleAt) {
+        eligibleAt = gapAt;
+      }
+    }
+  }
+  return eligibleAt;
+}
+
+function estimateQueuedPosts(posts, lastPostedByGroup) {
+  const now = new Date();
+  const intervalMs = SCHEDULER_INTERVAL_MINUTES * 60_000;
+  let tick = ceilToInterval(now, intervalMs);
+  const remaining = posts.filter(p => p.status === 'queued');
+  const estimates = new Map();
+  const lastPosted = new Map(lastPostedByGroup);
+
+  while (remaining.length > 0) {
+    let earliestEligible = null;
+    const candidates = [];
+
+    for (const post of remaining) {
+      const eligibleAt = computeEligibleAt(post, lastPosted, now);
+      if (!earliestEligible || eligibleAt < earliestEligible) {
+        earliestEligible = eligibleAt;
+      }
+      if (eligibleAt <= tick) {
+        candidates.push(post);
+      }
+    }
+
+    if (candidates.length === 0) {
+      if (!earliestEligible) break;
+      tick = ceilToInterval(earliestEligible, intervalMs);
+      continue;
+    }
+
+    candidates.sort(compareQueueOrder);
+    const chosen = candidates[0];
+    estimates.set(chosen.id, new Date(tick));
+
+    if (chosen.queue_group) {
+      lastPosted.set(chosen.queue_group, new Date(tick));
+    }
+
+    const index = remaining.findIndex(p => p.id === chosen.id);
+    if (index >= 0) {
+      remaining.splice(index, 1);
+    } else {
+      break;
+    }
+
+    tick = new Date(tick.getTime() + intervalMs);
+  }
+
+  return estimates;
 }
 
 exports.handler = async (event) => {
@@ -90,6 +182,23 @@ async function handleGet(event) {
     const countParams = status ? [status] : [];
     const countResult = await mysql.query(countQuery, countParams);
 
+    const needsQueueEstimates = posts.some(p => p.status === 'queued');
+    let lastPostedByGroup = new Map();
+    if (needsQueueEstimates) {
+      const lastPostedRows = await mysql.query(`
+        SELECT queue_group, MAX(posted_at) AS last_posted_at
+        FROM social_posts
+        WHERE status = 'posted' AND queue_group IS NOT NULL
+        GROUP BY queue_group
+      `);
+      lastPostedRows.forEach(row => {
+        const date = toDate(row.last_posted_at);
+        if (row.queue_group && date) {
+          lastPostedByGroup.set(row.queue_group, date);
+        }
+      });
+    }
+
     await mysql.end();
 
     // Parse JSON results
@@ -99,8 +208,19 @@ async function handleGet(event) {
       results: typeof p.results === 'string' ? JSON.parse(p.results) : (p.results || []),
     }));
 
+    const estimatedTimes = needsQueueEstimates
+      ? estimateQueuedPosts(parsedPosts, lastPostedByGroup)
+      : new Map();
+
+    const withEstimates = parsedPosts.map(post => ({
+      ...post,
+      estimated_post_at: estimatedTimes.get(post.id)
+        ? estimatedTimes.get(post.id).toISOString()
+        : null,
+    }));
+
     return success({
-      posts: parsedPosts,
+      posts: withEstimates,
       total: countResult[0].total,
       limit,
       offset,
