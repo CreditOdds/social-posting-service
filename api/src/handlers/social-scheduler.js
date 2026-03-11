@@ -20,6 +20,11 @@ const linkedin = require('../lib/platforms/linkedin');
 
 const platformModules = { twitter, reddit, facebook, instagram, linkedin };
 
+function getGlobalMinGapMinutes(settings) {
+  const value = settings?.queue?.min_gap_minutes;
+  return Number.isInteger(value) && value > 0 ? value : 0;
+}
+
 exports.handler = async (event) => {
   console.log('Scheduler triggered:', JSON.stringify(event));
 
@@ -31,11 +36,18 @@ exports.handler = async (event) => {
       return { statusCode: 200, body: 'Blackout window active' };
     }
 
+    const globalMinGapMinutes = getGlobalMinGapMinutes(settings);
+
     // MySQL rejects UPDATE ... JOIN ... ORDER BY ... LIMIT in this environment,
     // so first select the next eligible post, then claim it by id.
     const [nextPost] = await mysql.query(`
       SELECT p.id
       FROM social_posts p
+      CROSS JOIN (
+        SELECT MAX(posted_at) AS last_posted_at
+        FROM social_posts
+        WHERE status = 'posted'
+      ) overall_last_posted
       LEFT JOIN (
         SELECT queue_group, MAX(posted_at) AS last_posted_at
         FROM social_posts
@@ -45,14 +57,19 @@ exports.handler = async (event) => {
       WHERE p.status = 'queued'
         AND (p.scheduled_at IS NULL OR p.scheduled_at <= NOW())
         AND (
+          ? = 0
+          OR overall_last_posted.last_posted_at IS NULL
+          OR overall_last_posted.last_posted_at <= DATE_SUB(NOW(), INTERVAL ? MINUTE)
+        )
+        AND (
           p.min_gap_minutes IS NULL
           OR p.queue_group IS NULL
           OR last_posted.last_posted_at IS NULL
           OR last_posted.last_posted_at <= DATE_SUB(NOW(), INTERVAL p.min_gap_minutes MINUTE)
-        )
+      )
       ORDER BY p.priority DESC, p.scheduled_at ASC, p.created_at ASC
       LIMIT 1
-    `);
+    `, [globalMinGapMinutes, globalMinGapMinutes]);
 
     if (!nextPost) {
       console.log('No queued posts to process');

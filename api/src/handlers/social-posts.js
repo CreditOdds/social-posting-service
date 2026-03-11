@@ -54,11 +54,23 @@ function compareQueueOrder(a, b) {
   return (aCreated ? aCreated.getTime() : 0) - (bCreated ? bCreated.getTime() : 0);
 }
 
-function computeEligibleAt(post, lastPostedByGroup, now) {
+function getGlobalMinGapMinutes(settings) {
+  const value = settings?.queue?.min_gap_minutes;
+  return Number.isInteger(value) && value > 0 ? value : 0;
+}
+
+function computeEligibleAt(post, lastPostedAt, lastPostedByGroup, settings, now) {
   let eligibleAt = now;
   const scheduledAt = toDate(post.scheduled_at);
   if (scheduledAt && scheduledAt > eligibleAt) {
     eligibleAt = scheduledAt;
+  }
+  const globalMinGapMinutes = getGlobalMinGapMinutes(settings);
+  if (globalMinGapMinutes > 0 && lastPostedAt) {
+    const globalGapAt = new Date(lastPostedAt.getTime() + globalMinGapMinutes * 60_000);
+    if (globalGapAt > eligibleAt) {
+      eligibleAt = globalGapAt;
+    }
   }
   if (post.queue_group && post.min_gap_minutes != null) {
     const lastPosted = lastPostedByGroup.get(post.queue_group);
@@ -72,20 +84,21 @@ function computeEligibleAt(post, lastPostedByGroup, now) {
   return eligibleAt;
 }
 
-function estimateQueuedPosts(posts, lastPostedByGroup, blackout) {
+function estimateQueuedPosts(posts, lastPostedAt, lastPostedByGroup, settings) {
   const now = new Date();
   const intervalMs = SCHEDULER_INTERVAL_MINUTES * 60_000;
-  let tick = advanceToNextAllowedTick(ceilToInterval(now, intervalMs), intervalMs, blackout);
+  let tick = advanceToNextAllowedTick(ceilToInterval(now, intervalMs), intervalMs, settings?.blackout);
   const remaining = posts.filter(p => p.status === 'queued');
   const estimates = new Map();
   const lastPosted = new Map(lastPostedByGroup);
+  let latestPostedAt = lastPostedAt ? new Date(lastPostedAt) : null;
 
   while (remaining.length > 0) {
     let earliestEligible = null;
     const candidates = [];
 
     for (const post of remaining) {
-      const eligibleAt = computeEligibleAt(post, lastPosted, now);
+      const eligibleAt = computeEligibleAt(post, latestPostedAt, lastPosted, settings, now);
       if (!earliestEligible || eligibleAt < earliestEligible) {
         earliestEligible = eligibleAt;
       }
@@ -96,13 +109,14 @@ function estimateQueuedPosts(posts, lastPostedByGroup, blackout) {
 
     if (candidates.length === 0) {
       if (!earliestEligible) break;
-      tick = advanceToNextAllowedTick(ceilToInterval(earliestEligible, intervalMs), intervalMs, blackout);
+      tick = advanceToNextAllowedTick(ceilToInterval(earliestEligible, intervalMs), intervalMs, settings?.blackout);
       continue;
     }
 
     candidates.sort(compareQueueOrder);
     const chosen = candidates[0];
     estimates.set(chosen.id, new Date(tick));
+    latestPostedAt = new Date(tick);
 
     if (chosen.queue_group) {
       lastPosted.set(chosen.queue_group, new Date(tick));
@@ -115,7 +129,7 @@ function estimateQueuedPosts(posts, lastPostedByGroup, blackout) {
       break;
     }
 
-    tick = advanceToNextAllowedTick(new Date(tick.getTime() + intervalMs), intervalMs, blackout);
+    tick = advanceToNextAllowedTick(new Date(tick.getTime() + intervalMs), intervalMs, settings?.blackout);
   }
 
   return estimates;
@@ -186,9 +200,16 @@ async function handleGet(event) {
 
     const needsQueueEstimates = posts.some(p => p.status === 'queued');
     let lastPostedByGroup = new Map();
+    let lastPostedAt = null;
     let settings = null;
     if (needsQueueEstimates) {
       settings = await loadSettings(mysql);
+      const [lastPostedRow] = await mysql.query(`
+        SELECT MAX(posted_at) AS last_posted_at
+        FROM social_posts
+        WHERE status = 'posted'
+      `);
+      lastPostedAt = toDate(lastPostedRow?.last_posted_at);
       const lastPostedRows = await mysql.query(`
         SELECT queue_group, MAX(posted_at) AS last_posted_at
         FROM social_posts
@@ -213,7 +234,7 @@ async function handleGet(event) {
     }));
 
     const estimatedTimes = needsQueueEstimates
-      ? estimateQueuedPosts(parsedPosts, lastPostedByGroup, settings?.blackout)
+      ? estimateQueuedPosts(parsedPosts, lastPostedAt, lastPostedByGroup, settings)
       : new Map();
 
     const withEstimates = parsedPosts.map(post => ({

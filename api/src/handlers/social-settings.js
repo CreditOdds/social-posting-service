@@ -10,6 +10,14 @@ const { success, error, options } = require('../lib/response');
 const { DEFAULT_SETTINGS, mergeSettings, loadSettings } = require('../lib/settings');
 const { parseTimeToMinutes } = require('../lib/blackout');
 
+function parseNonNegativeInt(value, fieldName) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    return `${fieldName} must be a non-negative integer`;
+  }
+  return null;
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return options();
 
@@ -56,6 +64,15 @@ async function handlePut(event) {
       }
     } else {
       next.blackout = DEFAULT_SETTINGS.blackout;
+    }
+
+    if (next.queue) {
+      const queueGapError = parseNonNegativeInt(next.queue.min_gap_minutes, 'queue.min_gap_minutes');
+      if (queueGapError) {
+        return error(400, queueGapError);
+      }
+    } else {
+      next.queue = DEFAULT_SETTINGS.queue;
     }
 
     await mysql.query(
