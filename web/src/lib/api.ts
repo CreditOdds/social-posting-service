@@ -71,6 +71,9 @@ export interface SocialSettings {
     end: string;
     timezone: string;
   };
+  queue: {
+    min_gap_minutes: number;
+  };
 }
 
 // Posts API

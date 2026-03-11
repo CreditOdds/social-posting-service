@@ -228,12 +228,12 @@ export default function PostForm({ onSuccess }: PostFormProps) {
               value={minGapHours}
               onChange={e => setMinGapHours(e.target.value)}
               className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
-              placeholder="24"
+              placeholder="Use settings default"
             />
           </div>
         </div>
         <p className="mt-2 text-xs text-gray-400">
-          Example: set queue group to "evergreen" and min gap to 24 hours to post at most once per day.
+          Leave min gap blank to use the global spacing from Settings. Add a queue group to enforce extra spacing within a specific series.
         </p>
       </div>
 

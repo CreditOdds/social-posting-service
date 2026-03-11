@@ -11,6 +11,9 @@ const DEFAULT_SETTINGS: SocialSettings = {
     end: '07:00',
     timezone: 'America/New_York',
   },
+  queue: {
+    min_gap_minutes: 0,
+  },
 };
 
 export default function SettingsPage() {
@@ -63,6 +66,10 @@ export default function SettingsPage() {
     }
   };
 
+  const queueGapHours = settings.queue.min_gap_minutes > 0
+    ? settings.queue.min_gap_minutes / 60
+    : 0;
+
   if (authState.isLoading) {
     return <div className="text-center py-12 text-gray-500">Loading...</div>;
   }
@@ -97,65 +104,104 @@ export default function SettingsPage() {
       {loading ? (
         <div className="text-center py-8 text-gray-500">Loading settings...</div>
       ) : (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4 max-w-2xl">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Blackout Window</h2>
-            <p className="text-sm text-gray-500">
-              Prevent posting during overnight hours (US Eastern time).
-            </p>
-          </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-6 max-w-2xl">
+          <section className="space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Queue Spacing</h2>
+              <p className="text-sm text-gray-500">
+                Set the minimum time between any two published posts. Leave at 0 to disable.
+              </p>
+            </div>
 
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={settings.blackout.enabled}
-              onChange={e => setSettings({
-                ...settings,
-                blackout: { ...settings.blackout, enabled: e.target.checked },
-              })}
-            />
-            Enable blackout
-          </label>
+            <div className="max-w-xs">
+              <label className="block text-xs text-gray-500 mb-1">Minimum gap (hours)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={Number.isInteger(queueGapHours) ? queueGapHours : queueGapHours.toFixed(2).replace(/\.?0+$/, '')}
+                onChange={e => {
+                  const nextValue = e.target.value;
+                  const parsed = Number(nextValue);
+                  setSettings({
+                    ...settings,
+                    queue: {
+                      ...settings.queue,
+                      min_gap_minutes: nextValue === '' || !Number.isFinite(parsed)
+                        ? 0
+                        : Math.max(0, Math.round(parsed * 60)),
+                    },
+                  });
+                }}
+                className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                placeholder="0"
+              />
+              <p className="mt-2 text-xs text-gray-400">
+                Applies across the whole queue. Per-post queue group gaps still work as additional spacing rules.
+              </p>
+            </div>
+          </section>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <section className="space-y-4 border-t border-gray-100 pt-6">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Start (ET)</label>
+              <h2 className="text-lg font-semibold text-gray-900">Blackout Window</h2>
+              <p className="text-sm text-gray-500">
+                Prevent posting during overnight hours (US Eastern time).
+              </p>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm text-gray-700">
               <input
-                type="time"
-                value={settings.blackout.start}
+                type="checkbox"
+                checked={settings.blackout.enabled}
                 onChange={e => setSettings({
                   ...settings,
-                  blackout: { ...settings.blackout, start: e.target.value },
+                  blackout: { ...settings.blackout, enabled: e.target.checked },
                 })}
-                className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
               />
+              Enable blackout
+            </label>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Start (ET)</label>
+                <input
+                  type="time"
+                  value={settings.blackout.start}
+                  onChange={e => setSettings({
+                    ...settings,
+                    blackout: { ...settings.blackout, start: e.target.value },
+                  })}
+                  className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">End (ET)</label>
+                <input
+                  type="time"
+                  value={settings.blackout.end}
+                  onChange={e => setSettings({
+                    ...settings,
+                    blackout: { ...settings.blackout, end: e.target.value },
+                  })}
+                  className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Timezone</label>
+                <input
+                  type="text"
+                  value={settings.blackout.timezone}
+                  onChange={e => setSettings({
+                    ...settings,
+                    blackout: { ...settings.blackout, timezone: e.target.value },
+                  })}
+                  className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                  placeholder="America/New_York"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">End (ET)</label>
-              <input
-                type="time"
-                value={settings.blackout.end}
-                onChange={e => setSettings({
-                  ...settings,
-                  blackout: { ...settings.blackout, end: e.target.value },
-                })}
-                className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Timezone</label>
-              <input
-                type="text"
-                value={settings.blackout.timezone}
-                onChange={e => setSettings({
-                  ...settings,
-                  blackout: { ...settings.blackout, timezone: e.target.value },
-                })}
-                className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
-                placeholder="America/New_York"
-              />
-            </div>
-          </div>
+          </section>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
           {success && <p className="text-sm text-green-600">{success}</p>}

@@ -5,6 +5,9 @@ const DEFAULT_SETTINGS = {
     end: '07:00',
     timezone: 'America/New_York',
   },
+  queue: {
+    min_gap_minutes: 0,
+  },
 };
 
 function mergeSettings(raw) {
@@ -13,10 +16,15 @@ function mergeSettings(raw) {
     ...DEFAULT_SETTINGS.blackout,
     ...(raw.blackout && typeof raw.blackout === 'object' ? raw.blackout : {}),
   };
+  const queue = {
+    ...DEFAULT_SETTINGS.queue,
+    ...(raw.queue && typeof raw.queue === 'object' ? raw.queue : {}),
+  };
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
     blackout,
+    queue,
   };
 }
 
