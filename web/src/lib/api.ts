@@ -64,6 +64,15 @@ export interface SocialAccount {
   total_failures: number;
 }
 
+export interface SocialSettings {
+  blackout: {
+    enabled: boolean;
+    start: string;
+    end: string;
+    timezone: string;
+  };
+}
+
 // Posts API
 export async function getPosts(token: string, status?: string) {
   const params = status ? `?status=${status}` : '';
@@ -124,6 +133,18 @@ export async function updateAccount(token: string, data: {
   return apiFetch('/social/accounts', token, {
     method: 'PUT',
     body: JSON.stringify(data),
+  });
+}
+
+// Settings API
+export async function getSettings(token: string) {
+  return apiFetch('/social/settings', token);
+}
+
+export async function updateSettings(token: string, settings: SocialSettings) {
+  return apiFetch('/social/settings', token, {
+    method: 'PUT',
+    body: JSON.stringify(settings),
   });
 }
 

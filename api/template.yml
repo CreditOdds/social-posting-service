@@ -218,6 +218,42 @@ Resources:
             Path: /social/accounts
             Method: PUT
             RestApiId: !Ref SocialPostingAPI
+
+  SocialSettingsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/social-settings.handler
+      Runtime: nodejs18.x
+      MemorySize: 128
+      Timeout: 30
+      Description: Global social posting settings
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          DATABASE: !Ref DATABASE
+          USERNAME: !Ref USERNAME
+          PASSWORD: !Ref PASSWORD
+      Events:
+        GetSettings:
+          Type: Api
+          Properties:
+            Path: /social/settings
+            Method: GET
+            RestApiId: !Ref SocialPostingAPI
+        UpdateSettings:
+          Type: Api
+          Properties:
+            Path: /social/settings
+            Method: PUT
+            RestApiId: !Ref SocialPostingAPI
+        SettingsOptions:
+          Type: Api
+          Properties:
+            Path: /social/settings
+            Method: OPTIONS
+            RestApiId: !Ref SocialPostingAPI
+            Auth:
+              Authorizer: NONE
         AccountsOptions:
           Type: Api
           Properties:
