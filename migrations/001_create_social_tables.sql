@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS social_posts (
   source_type ENUM('manual', 'news', 'article', 'api') NOT NULL DEFAULT 'manual',
   source_id VARCHAR(255) DEFAULT NULL,
   status ENUM('draft', 'queued', 'posting', 'posted', 'failed', 'cancelled') NOT NULL DEFAULT 'draft',
+  priority INT NOT NULL DEFAULT 0,
+  queue_group VARCHAR(64) DEFAULT NULL,
+  min_gap_minutes INT DEFAULT NULL,
   scheduled_at DATETIME DEFAULT NULL,
   posted_at DATETIME DEFAULT NULL,
   platforms JSON DEFAULT NULL COMMENT 'e.g. ["twitter","reddit"]. NULL = all active platforms',
@@ -18,6 +21,8 @@ CREATE TABLE IF NOT EXISTS social_posts (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_status (status),
   INDEX idx_scheduled (status, scheduled_at),
+  INDEX idx_queue (status, priority, scheduled_at, created_at),
+  INDEX idx_queue_group (queue_group, status, posted_at),
   INDEX idx_source (source_type, source_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

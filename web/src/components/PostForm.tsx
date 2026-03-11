@@ -17,6 +17,9 @@ export default function PostForm({ onSuccess }: PostFormProps) {
   const [text, setText] = useState('');
   const [linkUrl, setLinkUrl] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [priority, setPriority] = useState('0');
+  const [queueGroup, setQueueGroup] = useState('');
+  const [minGapHours, setMinGapHours] = useState('');
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -60,18 +63,50 @@ export default function PostForm({ onSuccess }: PostFormProps) {
       const token = await getToken();
       if (!token) throw new Error('Not authenticated');
 
+      const trimmedPriority = priority.trim();
+      let resolvedPriority: number | undefined;
+      if (trimmedPriority.length > 0) {
+        const parsedPriority = Number(trimmedPriority);
+        if (!Number.isFinite(parsedPriority)) {
+          setError('Priority must be a number');
+          setSaving(false);
+          return;
+        }
+        resolvedPriority = Math.trunc(parsedPriority);
+      }
+
+      const trimmedMinGap = minGapHours.trim();
+      let resolvedMinGapMinutes: number | undefined;
+      if (trimmedMinGap.length > 0) {
+        const parsedGap = Number(trimmedMinGap);
+        if (!Number.isFinite(parsedGap) || parsedGap < 0) {
+          setError('Min gap must be a non-negative number');
+          setSaving(false);
+          return;
+        }
+        resolvedMinGapMinutes = Math.round(parsedGap * 60);
+      }
+
+      const trimmedQueueGroup = queueGroup.trim();
+
       await createPost(token, {
         text_content: text,
         image_url: imageUrl || undefined,
         link_url: linkUrl || undefined,
         status,
         platforms: selectedPlatforms.length > 0 ? selectedPlatforms : undefined,
+        priority: resolvedPriority,
+        queue_group: trimmedQueueGroup.length > 0 ? trimmedQueueGroup : undefined,
+        min_gap_minutes: resolvedMinGapMinutes,
       });
 
       setSuccess(status === 'queued' ? 'Post queued!' : 'Draft saved!');
       setText('');
       setLinkUrl('');
       setImageUrl('');
+      setPriority('0');
+      setQueueGroup('');
+      setMinGapHours('');
       setSelectedPlatforms([]);
       setAiTopic('');
       onSuccess?.();
@@ -158,6 +193,48 @@ export default function PostForm({ onSuccess }: PostFormProps) {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Queue settings */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Queue settings</label>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Priority (higher = sooner)</label>
+            <input
+              type="number"
+              value={priority}
+              onChange={e => setPriority(e.target.value)}
+              className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+              placeholder="0"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Queue group</label>
+            <input
+              type="text"
+              value={queueGroup}
+              onChange={e => setQueueGroup(e.target.value)}
+              className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+              placeholder="evergreen"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Min gap (hours)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={minGapHours}
+              onChange={e => setMinGapHours(e.target.value)}
+              className="w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+              placeholder="24"
+            />
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-gray-400">
+          Example: set queue group to "evergreen" and min gap to 24 hours to post at most once per day.
+        </p>
       </div>
 
       {/* Error/success messages */}

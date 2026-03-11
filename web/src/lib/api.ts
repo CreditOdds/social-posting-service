@@ -27,6 +27,9 @@ export interface SocialPost {
   source_type: 'manual' | 'news' | 'article' | 'api';
   source_id: string | null;
   status: 'draft' | 'queued' | 'posting' | 'posted' | 'failed' | 'cancelled';
+  priority: number;
+  queue_group: string | null;
+  min_gap_minutes: number | null;
   scheduled_at: string | null;
   posted_at: string | null;
   platforms: string[] | null;
@@ -72,6 +75,9 @@ export async function createPost(token: string, data: {
   link_url?: string;
   source_type?: string;
   status?: string;
+  priority?: number;
+  queue_group?: string;
+  min_gap_minutes?: number | null;
   scheduled_at?: string;
   platforms?: string[];
 }) {
@@ -87,6 +93,9 @@ export async function updatePost(token: string, data: {
   image_url?: string;
   link_url?: string;
   status?: string;
+  priority?: number;
+  queue_group?: string | null;
+  min_gap_minutes?: number | null;
   scheduled_at?: string;
   platforms?: string[];
 }) {

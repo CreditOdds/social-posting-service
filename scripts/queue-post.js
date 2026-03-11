@@ -118,6 +118,7 @@ async function queuePost(textContent, linkUrl, sourceType, sourceId) {
       source_type: sourceType,
       source_id: sourceId,
       status: 'queued',
+      priority: sourceType === 'news' ? 100 : 25,
     }),
   });
 

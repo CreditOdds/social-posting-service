@@ -10,6 +10,23 @@ const mysql = require('../lib/db');
 const { isAdmin, getUserId } = require('../lib/admin-check');
 const { success, error, options } = require('../lib/response');
 
+function parseOptionalInt(value, fieldName) {
+  if (value === undefined) return { provided: false };
+  if (value === null || value === '') return { provided: true, value: null };
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return { provided: true, error: `${fieldName} must be a number` };
+  }
+  return { provided: true, value: Math.trunc(parsed) };
+}
+
+function normalizeQueueGroup(value) {
+  if (value === undefined) return { provided: false };
+  if (value === null) return { provided: true, value: null };
+  const trimmed = String(value).trim();
+  return { provided: true, value: trimmed.length > 0 ? trimmed : null };
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return options();
 
@@ -97,7 +114,19 @@ async function handleGet(event) {
 async function handlePost(event, userId) {
   try {
     const body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-    const { text_content, image_url, link_url, source_type, source_id, status: postStatus, scheduled_at, platforms } = body;
+    const {
+      text_content,
+      image_url,
+      link_url,
+      source_type,
+      source_id,
+      status: postStatus,
+      scheduled_at,
+      platforms,
+      priority,
+      queue_group,
+      min_gap_minutes,
+    } = body;
 
     if (!text_content || !text_content.trim()) {
       return error(400, 'text_content is required');
@@ -106,7 +135,18 @@ async function handlePost(event, userId) {
     const validStatuses = ['draft', 'queued'];
     const finalStatus = validStatuses.includes(postStatus) ? postStatus : 'draft';
 
-    const result = await mysql.query('INSERT INTO social_posts SET ?', {
+    const parsedPriority = parseOptionalInt(priority, 'priority');
+    if (parsedPriority.error) return error(400, parsedPriority.error);
+
+    const parsedMinGap = parseOptionalInt(min_gap_minutes, 'min_gap_minutes');
+    if (parsedMinGap.error) return error(400, parsedMinGap.error);
+    if (parsedMinGap.provided && parsedMinGap.value !== null && parsedMinGap.value < 0) {
+      return error(400, 'min_gap_minutes must be >= 0');
+    }
+
+    const parsedQueueGroup = normalizeQueueGroup(queue_group);
+
+    const insertData = {
       text_content: text_content.trim(),
       image_url: image_url || null,
       link_url: link_url || null,
@@ -116,7 +156,13 @@ async function handlePost(event, userId) {
       scheduled_at: scheduled_at || null,
       platforms: platforms ? JSON.stringify(platforms) : null,
       created_by: userId || 'system',
-    });
+    };
+
+    if (parsedPriority.provided) insertData.priority = parsedPriority.value ?? 0;
+    if (parsedQueueGroup.provided) insertData.queue_group = parsedQueueGroup.value;
+    if (parsedMinGap.provided) insertData.min_gap_minutes = parsedMinGap.value;
+
+    const result = await mysql.query('INSERT INTO social_posts SET ?', insertData);
 
     await mysql.end();
 
@@ -130,7 +176,18 @@ async function handlePost(event, userId) {
 async function handlePut(event) {
   try {
     const body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-    const { id, text_content, image_url, link_url, status: newStatus, scheduled_at, platforms } = body;
+    const {
+      id,
+      text_content,
+      image_url,
+      link_url,
+      status: newStatus,
+      scheduled_at,
+      platforms,
+      priority,
+      queue_group,
+      min_gap_minutes,
+    } = body;
 
     if (!id) {
       return error(400, 'id is required');
@@ -153,6 +210,20 @@ async function handlePut(event) {
     if (link_url !== undefined) updates.link_url = link_url || null;
     if (scheduled_at !== undefined) updates.scheduled_at = scheduled_at || null;
     if (platforms !== undefined) updates.platforms = platforms ? JSON.stringify(platforms) : null;
+
+    const parsedPriority = parseOptionalInt(priority, 'priority');
+    if (parsedPriority.error) return error(400, parsedPriority.error);
+    if (parsedPriority.provided) updates.priority = parsedPriority.value ?? 0;
+
+    const parsedMinGap = parseOptionalInt(min_gap_minutes, 'min_gap_minutes');
+    if (parsedMinGap.error) return error(400, parsedMinGap.error);
+    if (parsedMinGap.provided && parsedMinGap.value !== null && parsedMinGap.value < 0) {
+      return error(400, 'min_gap_minutes must be >= 0');
+    }
+    if (parsedMinGap.provided) updates.min_gap_minutes = parsedMinGap.value;
+
+    const parsedQueueGroup = normalizeQueueGroup(queue_group);
+    if (parsedQueueGroup.provided) updates.queue_group = parsedQueueGroup.value;
 
     const validStatuses = ['draft', 'queued', 'cancelled'];
     if (newStatus && validStatuses.includes(newStatus)) {
