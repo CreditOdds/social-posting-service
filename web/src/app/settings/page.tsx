@@ -16,6 +16,19 @@ const DEFAULT_SETTINGS: SocialSettings = {
   },
 };
 
+function normalizeSettings(value: Partial<SocialSettings> | null | undefined): SocialSettings {
+  return {
+    blackout: {
+      ...DEFAULT_SETTINGS.blackout,
+      ...(value?.blackout || {}),
+    },
+    queue: {
+      ...DEFAULT_SETTINGS.queue,
+      ...(value?.queue || {}),
+    },
+  };
+}
+
 export default function SettingsPage() {
   const { authState, getToken, signInWithGoogle } = useAuth();
   const [settings, setSettings] = useState<SocialSettings>(DEFAULT_SETTINGS);
@@ -38,7 +51,7 @@ export default function SettingsPage() {
       if (!token) return;
       const data = await getSettings(token);
       if (data?.settings) {
-        setSettings(data.settings);
+        setSettings(normalizeSettings(data.settings));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -54,9 +67,9 @@ export default function SettingsPage() {
     try {
       const token = await getToken();
       if (!token) return;
-      const data = await updateSettings(token, settings);
+      const data = await updateSettings(token, normalizeSettings(settings));
       if (data?.settings) {
-        setSettings(data.settings);
+        setSettings(normalizeSettings(data.settings));
       }
       setSuccess('Settings saved.');
     } catch (err) {
