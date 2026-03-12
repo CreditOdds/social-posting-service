@@ -207,13 +207,13 @@ async function handleGet(event) {
       const [lastPostedRow] = await mysql.query(`
         SELECT MAX(posted_at) AS last_posted_at
         FROM social_posts
-        WHERE status = 'posted'
+        WHERE posted_at IS NOT NULL
       `);
       lastPostedAt = toDate(lastPostedRow?.last_posted_at);
       const lastPostedRows = await mysql.query(`
         SELECT queue_group, MAX(posted_at) AS last_posted_at
         FROM social_posts
-        WHERE status = 'posted' AND queue_group IS NOT NULL
+        WHERE posted_at IS NOT NULL AND queue_group IS NOT NULL
         GROUP BY queue_group
       `);
       lastPostedRows.forEach(row => {
