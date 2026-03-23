@@ -100,8 +100,8 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
               <PlatformBadge platform={r.platform} />
               <StatusBadge status={r.status} />
               {r.platform_post_url && (
-                <a href={r.platform_post_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline truncate">
-                  View
+                <a href={r.platform_post_url} target="_blank" rel="noopener noreferrer" className={`hover:underline truncate ${r.status === 'pending_manual' ? 'text-orange-600 font-semibold' : 'text-indigo-600'}`}>
+                  {r.status === 'pending_manual' ? 'Post now →' : 'View'}
                 </a>
               )}
               {r.error_message && (

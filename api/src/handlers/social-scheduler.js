@@ -154,10 +154,12 @@ exports.handler = async (event) => {
           imageUrl,
         });
 
+        const resultStatus = result.manual ? 'pending_manual' : 'success';
+
         await mysql.query('INSERT INTO social_post_results SET ?', {
           post_id: post.id,
           platform,
-          status: 'success',
+          status: resultStatus,
           platform_post_id: result.postId || null,
           platform_post_url: result.postUrl || null,
           attempted_at: new Date(),
@@ -170,7 +172,7 @@ exports.handler = async (event) => {
         );
 
         anySucceeded = true;
-        console.log(`  ${platform}: success (${result.postUrl})`);
+        console.log(`  ${platform}: ${resultStatus} (${result.postUrl})`);
       } catch (err) {
         console.error(`  ${platform}: failed - ${err.message}`);
         allSucceeded = false;

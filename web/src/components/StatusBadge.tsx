@@ -9,6 +9,7 @@ const statusStyles: Record<string, string> = {
   cancelled: 'bg-gray-100 text-gray-500',
   pending: 'bg-gray-100 text-gray-600',
   success: 'bg-green-100 text-green-700',
+  pending_manual: 'bg-orange-100 text-orange-700',
 };
 
 export default function StatusBadge({ status }: { status: string }) {

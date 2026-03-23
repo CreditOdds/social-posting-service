@@ -21,8 +21,15 @@ export default function HistoryPage() {
     try {
       const token = await getToken();
       if (!token) return;
-      const data = await getPosts(token, 'posted');
-      setPosts(data.posts);
+      const data = await getPosts(token);
+      const postedPosts = (data.posts || [])
+        .filter((post: SocialPost) => Boolean(post.posted_at))
+        .sort((a: SocialPost, b: SocialPost) => {
+          const aTime = a.posted_at ? new Date(a.posted_at).getTime() : 0;
+          const bTime = b.posted_at ? new Date(b.posted_at).getTime() : 0;
+          return bTime - aTime;
+        });
+      setPosts(postedPosts);
     } catch (err) {
       console.error('Failed to load history:', err);
     } finally {
