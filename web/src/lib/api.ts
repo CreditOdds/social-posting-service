@@ -43,7 +43,7 @@ export interface SocialPost {
 export interface PostResult {
   id: number;
   platform: string;
-  status: 'pending' | 'success' | 'failed';
+  status: 'pending' | 'success' | 'failed' | 'pending_manual';
   platform_post_id: string | null;
   platform_post_url: string | null;
   error_message: string | null;
