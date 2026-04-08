@@ -68,6 +68,34 @@ Resources:
             AllowedOrigins: ['https://social.creditodds.com', 'http://localhost:3000']
             MaxAge: 300
 
+  # Origin Access Control for CloudFront → S3
+  SocialImagesOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: social-images-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # S3 bucket policy granting CloudFront read access
+  SocialImagesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SocialImagesBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${SocialImagesBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${SocialImagesCDN}'
+
   # CloudFront for image CDN
   SocialImagesCDN:
     Type: AWS::CloudFront::Distribution
@@ -76,6 +104,7 @@ Resources:
         Origins:
           - DomainName: !GetAtt SocialImagesBucket.RegionalDomainName
             Id: S3Origin
+            OriginAccessControlId: !GetAtt SocialImagesOAC.Id
             S3OriginConfig:
               OriginAccessIdentity: ''
         Enabled: true
