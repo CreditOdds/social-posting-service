@@ -75,9 +75,12 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry, onP
             </div>
           )}
           {post.link_url && (
-            <a href={post.link_url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:underline mt-1 block truncate">
-              {post.link_url}
-            </a>
+            <div className="mt-1">
+              <a href={post.link_url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:underline block truncate">
+                {post.link_url.replace(/([?&])utm_source=[^&]*/g, '$1utm_source={platform}')}
+              </a>
+              <span className="text-xs text-gray-400">utm_source set per platform at posting time</span>
+            </div>
           )}
           {post.image_url && (
             <div className="mt-3">
