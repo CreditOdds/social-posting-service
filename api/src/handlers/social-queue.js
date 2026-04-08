@@ -5,8 +5,11 @@
  * Authenticated via x-api-key header (SOCIAL_API_KEY env var).
  */
 
+const AWS = require('aws-sdk');
 const mysql = require('../lib/db');
 const { success, error, options } = require('../lib/response');
+
+const s3 = new AWS.S3();
 
 const DEFAULT_PRIORITY_BY_SOURCE = {
   news: 100,
@@ -51,6 +54,8 @@ exports.handler = async (event) => {
     const {
       text_content,
       image_url,
+      image_base64,
+      image_mime_type,
       link_url,
       source_type,
       source_id,
@@ -62,6 +67,37 @@ exports.handler = async (event) => {
 
     if (!text_content || !text_content.trim()) {
       return error(400, 'text_content is required');
+    }
+
+    // Resolve image URL: upload base64 to S3 if provided, otherwise use image_url
+    let resolvedImageUrl = image_url || null;
+    if (image_base64) {
+      const mimeType = image_mime_type || 'image/png';
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+      if (!allowedTypes.includes(mimeType)) {
+        return error(400, `Invalid image_mime_type. Allowed: ${allowedTypes.join(', ')}`);
+      }
+
+      const bucket = process.env.S3_BUCKET;
+      if (!bucket) {
+        return error(500, 'S3_BUCKET not configured');
+      }
+
+      const ext = mimeType.split('/')[1] === 'jpeg' ? 'jpg' : mimeType.split('/')[1];
+      const key = `social-images/${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${ext}`;
+      const buffer = Buffer.from(image_base64, 'base64');
+
+      await s3.putObject({
+        Bucket: bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: mimeType,
+      }).promise();
+
+      const cdnDomain = process.env.CDN_DOMAIN;
+      resolvedImageUrl = cdnDomain
+        ? `https://${cdnDomain}/${key}`
+        : `https://${bucket}.s3.amazonaws.com/${key}`;
     }
 
     const validSourceTypes = ['news', 'article', 'api'];
@@ -80,7 +116,7 @@ exports.handler = async (event) => {
 
     const insertData = {
       text_content: text_content.trim(),
-      image_url: image_url || null,
+      image_url: resolvedImageUrl,
       link_url: link_url || null,
       source_type: finalSourceType,
       source_id: source_id || null,
