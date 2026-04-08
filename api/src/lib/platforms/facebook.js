@@ -3,9 +3,12 @@
  *
  * Env vars: FACEBOOK_PAGE_ID, FACEBOOK_PAGE_ACCESS_TOKEN
  *
+ * If a link is provided, it is posted as a comment on the main post
+ * (external URLs in the main post body cause de-boosting).
+ *
  * @param {object} params
  * @param {string} params.text - Post body
- * @param {string} [params.linkUrl] - URL to share
+ * @param {string} [params.linkUrl] - URL to post as a comment
  * @param {string} [params.imageUrl] - Public URL for image (CloudFront)
  * @returns {Promise<{postId: string, postUrl: string}>}
  */
@@ -21,23 +24,20 @@ async function post({ text, linkUrl, imageUrl }) {
   let body;
 
   if (imageUrl) {
-    // Photo post with caption
+    // Photo post with caption (no link in caption)
     endpoint = `https://graph.facebook.com/v19.0/${pageId}/photos`;
     body = {
       url: imageUrl,
-      caption: linkUrl ? `${text}\n\n${linkUrl}` : text,
+      caption: text,
       access_token: accessToken,
     };
   } else {
-    // Text/link post
+    // Text-only post (no link attachment)
     endpoint = `https://graph.facebook.com/v19.0/${pageId}/feed`;
     body = {
       message: text,
       access_token: accessToken,
     };
-    if (linkUrl) {
-      body.link = linkUrl;
-    }
   }
 
   const response = await fetch(endpoint, {
@@ -53,6 +53,26 @@ async function post({ text, linkUrl, imageUrl }) {
 
   const data = await response.json();
   const postId = data.id || data.post_id;
+
+  // Post link as a comment on the main post
+  if (linkUrl && postId) {
+    const commentResponse = await fetch(
+      `https://graph.facebook.com/v19.0/${postId}/comments`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: linkUrl,
+          access_token: accessToken,
+        }),
+      }
+    );
+
+    if (!commentResponse.ok) {
+      const commentError = await commentResponse.json().catch(() => ({}));
+      console.error('Facebook comment error:', commentError.error?.message || commentResponse.statusText);
+    }
+  }
 
   return {
     postId,

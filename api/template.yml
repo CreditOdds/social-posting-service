@@ -327,7 +327,7 @@ Resources:
       Handler: src/handlers/social-queue.handler
       Runtime: nodejs18.x
       MemorySize: 128
-      Timeout: 10
+      Timeout: 30
       Description: Queue posts from CI/CD (API-key auth, no Firebase)
       Environment:
         Variables:
@@ -336,6 +336,11 @@ Resources:
           USERNAME: !Ref USERNAME
           PASSWORD: !Ref PASSWORD
           SOCIAL_API_KEY: !Ref SOCIALAPIKEY
+          S3_BUCKET: !Ref SocialImagesBucket
+          CDN_DOMAIN: !GetAtt SocialImagesCDN.DomainName
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref SocialImagesBucket
       Events:
         QueuePost:
           Type: Api
