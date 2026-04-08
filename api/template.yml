@@ -191,6 +191,42 @@ Resources:
             Description: Post next queued social media post every 35 minutes
             Enabled: true
 
+  SocialPublishFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/social-publish.handler
+      Runtime: nodejs18.x
+      MemorySize: 256
+      Timeout: 120
+      Description: Immediately publish a queued post (admin-only)
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          DATABASE: !Ref DATABASE
+          USERNAME: !Ref USERNAME
+          PASSWORD: !Ref PASSWORD
+          TWITTER_API_KEY: !Ref TWITTERAPIKEY
+          TWITTER_API_SECRET: !Ref TWITTERAPISECRET
+          TWITTER_ACCESS_TOKEN: !Ref TWITTERACCESSTOKEN
+          TWITTER_ACCESS_TOKEN_SECRET: !Ref TWITTERACCESSTOKENSECRET
+          FACEBOOK_PAGE_ID: !Ref FACEBOOKPAGEID
+          FACEBOOK_PAGE_ACCESS_TOKEN: !Ref FACEBOOKPAGEACCESSTOKEN
+      Events:
+        Publish:
+          Type: Api
+          Properties:
+            Path: /social/publish
+            Method: POST
+            RestApiId: !Ref SocialPostingAPI
+        PublishOptions:
+          Type: Api
+          Properties:
+            Path: /social/publish
+            Method: OPTIONS
+            RestApiId: !Ref SocialPostingAPI
+            Auth:
+              Authorizer: NONE
+
   SocialAccountsFunction:
     Type: AWS::Serverless::Function
     Properties:

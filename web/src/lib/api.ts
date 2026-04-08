@@ -122,6 +122,13 @@ export async function deletePost(token: string, id: number) {
   return apiFetch(`/social/posts?id=${id}`, token, { method: 'DELETE' });
 }
 
+export async function publishPost(token: string, id: number) {
+  return apiFetch('/social/publish', token, {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  });
+}
+
 // Accounts API
 export async function getAccounts(token: string) {
   return apiFetch('/social/accounts', token);

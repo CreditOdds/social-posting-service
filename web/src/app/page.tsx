@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/auth/AuthProvider';
-import { getPosts, updatePost, deletePost, SocialPost } from '@/lib/api';
+import { getPosts, updatePost, deletePost, publishPost, SocialPost } from '@/lib/api';
 import PostCard from '@/components/PostCard';
 
 export default function DashboardPage() {
@@ -50,6 +50,19 @@ export default function DashboardPage() {
       loadPosts();
     } catch (err) {
       console.error('Failed to retry post:', err);
+    }
+  };
+
+  const handlePublish = async (post: SocialPost) => {
+    if (!confirm('Post this to all platforms now?')) return;
+    try {
+      const token = await getToken();
+      if (!token) return;
+      await publishPost(token, post.id);
+      loadPosts();
+    } catch (err) {
+      console.error('Failed to publish post:', err);
+      alert(`Failed to publish: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -153,6 +166,7 @@ export default function DashboardPage() {
               post={post}
               onQueue={handleQueue}
               onRetry={handleRetry}
+              onPublish={handlePublish}
               onDelete={handleDelete}
             />
           ))}

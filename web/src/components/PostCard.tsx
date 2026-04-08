@@ -10,12 +10,14 @@ interface PostCardProps {
   onDelete?: (post: SocialPost) => void;
   onQueue?: (post: SocialPost) => void;
   onRetry?: (post: SocialPost) => void;
+  onPublish?: (post: SocialPost) => void;
 }
 
-export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: PostCardProps) {
+export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry, onPublish }: PostCardProps) {
   const canEdit = ['draft', 'queued', 'failed'].includes(post.status);
   const canQueue = post.status === 'draft';
   const canRetry = post.status === 'failed';
+  const canPublish = ['queued', 'failed'].includes(post.status);
   const canDelete = post.status !== 'posting';
   const estimatedAt = post.estimated_post_at ? new Date(post.estimated_post_at) : null;
   const estimatedLocal = estimatedAt ? estimatedAt.toLocaleString() : null;
@@ -78,8 +80,8 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
             </a>
           )}
           {post.image_url && (
-            <div className="mt-2">
-              <img src={post.image_url} alt="" className="h-20 rounded border border-gray-200 object-cover" />
+            <div className="mt-3">
+              <img src={post.image_url} alt="" className="max-h-48 rounded-lg border border-gray-200 object-contain" />
             </div>
           )}
         </div>
@@ -124,6 +126,11 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry }: P
         {canQueue && onQueue && (
           <button onClick={() => onQueue(post)} className="text-xs text-indigo-600 hover:text-indigo-800">
             Queue
+          </button>
+        )}
+        {canPublish && onPublish && (
+          <button onClick={() => onPublish(post)} className="text-xs text-green-600 hover:text-green-800 font-semibold">
+            Post Now
           </button>
         )}
         {canRetry && onRetry && (
