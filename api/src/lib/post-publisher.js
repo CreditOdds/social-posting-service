@@ -8,12 +8,18 @@ const fs = require('fs');
 const path = require('path');
 
 const twitter = require('./platforms/twitter');
+const twitterCardwire = require('./platforms/twitter-cardwire');
 const reddit = require('./platforms/reddit');
 const facebook = require('./platforms/facebook');
 const instagram = require('./platforms/instagram');
 const linkedin = require('./platforms/linkedin');
 
-const platformModules = { twitter, reddit, facebook, instagram, linkedin };
+const platformModules = { twitter, twitter_cardwire: twitterCardwire, reddit, facebook, instagram, linkedin };
+
+// Platforms that must be explicitly requested via the post's `platforms` list.
+// They are excluded from the default fan-out so general posts don't leak to
+// special-purpose accounts like @card_wire.
+const OPT_IN_ONLY_PLATFORMS = ['twitter_cardwire'];
 
 /**
  * Rewrite utm_source in a URL to match the target platform.
@@ -50,7 +56,7 @@ async function publishPost(post, mysql) {
 
   const targetPlatforms = postPlatforms
     ? postPlatforms.filter(p => activePlatformNames.includes(p))
-    : activePlatformNames;
+    : activePlatformNames.filter(p => !OPT_IN_ONLY_PLATFORMS.includes(p));
 
   if (targetPlatforms.length === 0) {
     await mysql.query("UPDATE social_posts SET status = 'failed' WHERE id = ?", [post.id]);
@@ -85,7 +91,7 @@ async function publishPost(post, mysql) {
     try {
       console.log(`Posting to ${platform}...`);
       const result = await mod.post({
-        text: post.text_content,
+        text: platform.startsWith('twitter') && post.twitter_text ? post.twitter_text : post.text_content,
         linkUrl: platformLinkUrl,
         imagePath,
         imageUrl,

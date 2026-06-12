@@ -102,7 +102,7 @@ flowchart LR
   Publisher --> Twitter["Twitter/X"]
   Publisher --> Facebook["Facebook"]
   Publisher --> Instagram["Instagram"]
-  Publisher --> Reddit["Reddit manual URL"]
+  Publisher --> Reddit["Reddit S3 feed → Devvit app"]
   Publisher --> LinkedIn["LinkedIn manual URL"]
 ```
 
@@ -209,13 +209,13 @@ Publishing behavior varies by platform:
 - Twitter/X: posts the main text, uploads media if present, and places the link in a reply tweet
 - Facebook: creates a page post, uses a photo post when an image exists, and places the link in a comment
 - Instagram: requires an image and uses the Graph API container/publish flow; links are added as comments
-- Reddit: generates a prefilled manual submit URL instead of API posting
+- Reddit: writes the post to a JSON feed in S3 (`creditodds-reddit-feed`); the Devvit app in [`devvit/`](./devvit) polls the feed every 10 minutes and submits it to r/creditodds (Reddit's Data API no longer accepts new apps, so posting goes through Reddit's Devvit platform instead). Falls back to a prefilled manual submit URL if `REDDIT_FEED_BUCKET` is unset.
 - LinkedIn: generates a prefilled manual share URL instead of API posting
 
 That means the platform layer is currently mixed:
 
-- automated publishing for Twitter, Facebook, and Instagram
-- human-assisted publishing for Reddit and LinkedIn
+- automated publishing for Twitter, Facebook, Instagram, and Reddit (via the Devvit feed)
+- human-assisted publishing for LinkedIn
 
 ## API Surface
 
@@ -264,13 +264,20 @@ Declared in [`api/template.yml`](./api/template.yml):
 - `TWITTERAPISECRET`
 - `TWITTERACCESSTOKEN`
 - `TWITTERACCESSTOKENSECRET`
+- `TWITTERCARDWIREAPIKEY` (optional — @card_wire Developer App key; blank reuses the shared app)
+- `TWITTERCARDWIREAPISECRET` (optional — @card_wire Developer App secret; blank reuses the shared app)
+- `TWITTERCARDWIREACCESSTOKEN` (user access token for the @card_wire account)
+- `TWITTERCARDWIREACCESSTOKENSECRET` (user access token secret for @card_wire)
 - `FACEBOOKPAGEID`
 - `FACEBOOKPAGEACCESSTOKEN`
 
 Also referenced in code:
 
 - `INSTAGRAM_ACCOUNT_ID`
+- `TWITTER_HANDLE` (optional, defaults to `creditodds` — used to build post URLs)
+- `TWITTER_CARDWIRE_HANDLE` (optional, defaults to `card_wire`)
 - `REDDIT_SUBREDDIT`
+- `REDDIT_FEED_BUCKET` / `REDDIT_FEED_TOKEN` (S3 feed polled by the Devvit app in [`devvit/`](./devvit))
 - `FIREBASE_PROJECT_ID`
 - `S3_BUCKET`
 - `CDN_DOMAIN`

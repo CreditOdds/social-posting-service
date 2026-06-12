@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
+    "resolveJsonModule": true,
+    "strict": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "target": "ES2022",
+    "outDir": "dist/types",
+    "tsBuildInfoFile": "dist/types/tsconfig.tsbuildinfo"
+  },
+  "include": ["src/**/*", "vite.config.ts"],
+  "exclude": []
+}
