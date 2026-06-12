@@ -53,6 +53,7 @@ exports.handler = async (event) => {
     const body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
     const {
       text_content,
+      twitter_text,
       image_url,
       image_base64,
       image_mime_type,
@@ -116,6 +117,7 @@ exports.handler = async (event) => {
 
     const insertData = {
       text_content: text_content.trim(),
+      twitter_text: twitter_text && twitter_text.trim() ? twitter_text.trim() : null,
       image_url: resolvedImageUrl,
       link_url: link_url || null,
       source_type: finalSourceType,

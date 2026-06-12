@@ -1,0 +1,53 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "creditoddsposter",
+  "server": {
+    "dir": "dist/server",
+    "entry": "index.cjs"
+  },
+  "permissions": {
+    "reddit": true,
+    "redis": true,
+    "http": {
+      "enable": true,
+      "domains": [
+        "creditodds-reddit-feed.s3.us-east-2.amazonaws.com"
+      ]
+    }
+  },
+  "scheduler": {
+    "tasks": {
+      "check-feed": {
+        "endpoint": "/internal/cron/check-feed",
+        "cron": "*/10 * * * *"
+      }
+    }
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Check bonus feed now",
+        "description": "Fetch the CreditOdds feed and post any new bonus updates immediately.",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/check-feed"
+      }
+    ]
+  },
+  "settings": {
+    "global": {
+      "feedUrl": {
+        "type": "string",
+        "label": "Feed URL (S3 JSON feed published by the social posting service)",
+        "isSecret": true
+      }
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
+  "dev": {
+    "subreddit": "creditoddsposter_dev"
+  }
+}

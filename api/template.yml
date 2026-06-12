@@ -45,6 +45,24 @@ Parameters:
     Type: String
     Description: Twitter access token secret
     NoEcho: true
+  TWITTERCARDWIREAPIKEY:
+    Type: String
+    Description: API key for the @card_wire Developer App (leave blank to reuse the shared app)
+    Default: ""
+    NoEcho: true
+  TWITTERCARDWIREAPISECRET:
+    Type: String
+    Description: API secret for the @card_wire Developer App (leave blank to reuse the shared app)
+    Default: ""
+    NoEcho: true
+  TWITTERCARDWIREACCESSTOKEN:
+    Type: String
+    Description: User access token for the @card_wire X account
+    NoEcho: true
+  TWITTERCARDWIREACCESSTOKENSECRET:
+    Type: String
+    Description: User access token secret for the @card_wire X account
+    NoEcho: true
   FACEBOOKPAGEID:
     Type: String
     Description: Facebook Page ID
@@ -52,6 +70,11 @@ Parameters:
   FACEBOOKPAGEACCESSTOKEN:
     Type: String
     Description: Facebook Page Access Token (long-lived)
+    NoEcho: true
+    Default: ''
+  REDDITFEEDTOKEN:
+    Type: String
+    Description: Random token used in the Reddit feed S3 key so the public feed URL is unguessable
     NoEcho: true
     Default: ''
 
@@ -67,6 +90,33 @@ Resources:
             AllowedMethods: [PUT]
             AllowedOrigins: ['https://social.creditodds.com', 'http://localhost:3000']
             MaxAge: 300
+
+  # S3 bucket holding the JSON feed polled by the Devvit app (devvit/ in repo).
+  # Objects under feed/ are public: Devvit's fetch allowlist permits
+  # <bucket>.s3.amazonaws.com but cannot send credentials, so the feed URL's
+  # secrecy comes from the REDDITFEEDTOKEN path segment.
+  RedditFeedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: creditodds-reddit-feed
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+
+  RedditFeedBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RedditFeedBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadFeed
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${RedditFeedBucket.Arn}/feed/*'
 
   # Origin Access Control for CloudFront → S3
   SocialImagesOAC:
@@ -120,7 +170,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/firebase-authorizer.firebaseAuthorizerHandler
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       MemorySize: 128
       Timeout: 10
       Environment:
@@ -148,7 +198,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/social-posts.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       MemorySize: 128
       Timeout: 30
       Description: CRUD operations for social media posts
@@ -196,7 +246,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/social-scheduler.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       MemorySize: 256
       Timeout: 120
       Description: Scheduled post publisher - triggered every 35 minutes
@@ -210,8 +260,17 @@ Resources:
           TWITTER_API_SECRET: !Ref TWITTERAPISECRET
           TWITTER_ACCESS_TOKEN: !Ref TWITTERACCESSTOKEN
           TWITTER_ACCESS_TOKEN_SECRET: !Ref TWITTERACCESSTOKENSECRET
+          TWITTER_CARDWIRE_API_KEY: !Ref TWITTERCARDWIREAPIKEY
+          TWITTER_CARDWIRE_API_SECRET: !Ref TWITTERCARDWIREAPISECRET
+          TWITTER_CARDWIRE_ACCESS_TOKEN: !Ref TWITTERCARDWIREACCESSTOKEN
+          TWITTER_CARDWIRE_ACCESS_TOKEN_SECRET: !Ref TWITTERCARDWIREACCESSTOKENSECRET
           FACEBOOK_PAGE_ID: !Ref FACEBOOKPAGEID
           FACEBOOK_PAGE_ACCESS_TOKEN: !Ref FACEBOOKPAGEACCESSTOKEN
+          REDDIT_FEED_BUCKET: !Ref RedditFeedBucket
+          REDDIT_FEED_TOKEN: !Ref REDDITFEEDTOKEN
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref RedditFeedBucket
       Events:
         ScheduleRule:
           Type: Schedule
@@ -224,7 +283,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/social-publish.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       MemorySize: 256
       Timeout: 120
       Description: Immediately publish a queued post (admin-only)
@@ -238,8 +297,17 @@ Resources:
           TWITTER_API_SECRET: !Ref TWITTERAPISECRET
           TWITTER_ACCESS_TOKEN: !Ref TWITTERACCESSTOKEN
           TWITTER_ACCESS_TOKEN_SECRET: !Ref TWITTERACCESSTOKENSECRET
+          TWITTER_CARDWIRE_API_KEY: !Ref TWITTERCARDWIREAPIKEY
+          TWITTER_CARDWIRE_API_SECRET: !Ref TWITTERCARDWIREAPISECRET
+          TWITTER_CARDWIRE_ACCESS_TOKEN: !Ref TWITTERCARDWIREACCESSTOKEN
+          TWITTER_CARDWIRE_ACCESS_TOKEN_SECRET: !Ref TWITTERCARDWIREACCESSTOKENSECRET
           FACEBOOK_PAGE_ID: !Ref FACEBOOKPAGEID
           FACEBOOK_PAGE_ACCESS_TOKEN: !Ref FACEBOOKPAGEACCESSTOKEN
+          REDDIT_FEED_BUCKET: !Ref RedditFeedBucket
+          REDDIT_FEED_TOKEN: !Ref REDDITFEEDTOKEN
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref RedditFeedBucket
       Events:
         Publish:
           Type: Api
@@ -260,7 +328,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/social-accounts.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       MemorySize: 128
       Timeout: 30
       Description: Platform account management
@@ -288,7 +356,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/social-settings.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       MemorySize: 128
       Timeout: 30
       Description: Global social posting settings
@@ -332,7 +400,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/social-generate.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       MemorySize: 128
       Timeout: 30
       Description: Generate social media post text using Claude Haiku
@@ -359,7 +427,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/social-upload.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       MemorySize: 128
       Timeout: 10
       Description: Generate presigned S3 URLs for image upload
@@ -390,7 +458,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: src/handlers/social-queue.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       MemorySize: 128
       Timeout: 30
       Description: Queue posts from CI/CD (API-key auth, no Firebase)
@@ -458,3 +526,6 @@ Outputs:
   SocialImagesCDNDomain:
     Description: CloudFront domain for social images
     Value: !GetAtt SocialImagesCDN.DomainName
+  RedditFeedBucketDomain:
+    Description: Host for the Devvit-polled Reddit feed (feed URL is https://<this>/feed/<token>.json)
+    Value: !Sub '${RedditFeedBucket}.s3.${AWS::Region}.amazonaws.com'
