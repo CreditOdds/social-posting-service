@@ -10,12 +10,46 @@ const mysql = require('../lib/db');
 const { success, error, options } = require('../lib/response');
 
 const s3 = new AWS.S3();
+const lambda = new AWS.Lambda();
 
 const DEFAULT_PRIORITY_BY_SOURCE = {
   news: 100,
   article: 25,
   api: 0,
 };
+
+// Card-wire updates are time-sensitive and must jump ahead of the regular
+// queue, so they get a priority well above any other source's default.
+const CARDWIRE_PRIORITY = 200;
+
+// The @card_wire feed is the only producer of the opt-in-only twitter_cardwire
+// platform, so its presence uniquely identifies a card-wire post.
+function isCardwirePost(platforms) {
+  return Array.isArray(platforms) && platforms.includes('twitter_cardwire');
+}
+
+// Kick the scheduler right now so a card-wire post publishes within seconds
+// instead of waiting for the next 35-minute tick. Fire-and-forget (async
+// invoke): if it fails, the post stays queued and the next scheduler tick still
+// picks it up — card-wire bypasses the blackout window in the scheduler query —
+// so the worst case is the normal cadence delay, never a dropped post.
+async function triggerSchedulerNow(postId) {
+  const fnName = process.env.SCHEDULER_FUNCTION_NAME;
+  if (!fnName) {
+    console.warn('SCHEDULER_FUNCTION_NAME not set; skipping immediate card-wire publish');
+    return;
+  }
+  try {
+    await lambda.invoke({
+      FunctionName: fnName,
+      InvocationType: 'Event',
+      Payload: JSON.stringify({ source: 'queue-immediate', postId }),
+    }).promise();
+    console.log(`Triggered scheduler immediately for card-wire post ${postId}`);
+  } catch (err) {
+    console.error(`Failed to trigger scheduler for card-wire post ${postId}: ${err.message}`);
+  }
+}
 
 function parseOptionalInt(value, fieldName) {
   if (value === undefined) return { provided: false };
@@ -127,8 +161,12 @@ exports.handler = async (event) => {
       created_by: 'system',
     };
 
+    const cardwire = isCardwirePost(platforms);
+
     if (parsedPriority.provided) {
       insertData.priority = parsedPriority.value ?? 0;
+    } else if (cardwire) {
+      insertData.priority = CARDWIRE_PRIORITY;
     } else if (DEFAULT_PRIORITY_BY_SOURCE[finalSourceType] !== undefined) {
       insertData.priority = DEFAULT_PRIORITY_BY_SOURCE[finalSourceType];
     }
@@ -139,6 +177,11 @@ exports.handler = async (event) => {
     const result = await mysql.query('INSERT INTO social_posts SET ?', insertData);
 
     await mysql.end();
+
+    // Publish card-wire updates immediately rather than on the next 35-min tick.
+    if (cardwire) {
+      await triggerSchedulerNow(result.insertId);
+    }
 
     return success({ id: result.insertId, status: 'queued' });
   } catch (err) {
