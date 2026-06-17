@@ -471,9 +471,14 @@ Resources:
           SOCIAL_API_KEY: !Ref SOCIALAPIKEY
           S3_BUCKET: !Ref SocialImagesBucket
           CDN_DOMAIN: !GetAtt SocialImagesCDN.DomainName
+          # Lets the queue handler kick the scheduler the instant a card-wire
+          # post lands, so it publishes immediately instead of on the next tick.
+          SCHEDULER_FUNCTION_NAME: !Ref SocialSchedulerFunction
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref SocialImagesBucket
+        - LambdaInvokePolicy:
+            FunctionName: !Ref SocialSchedulerFunction
       Events:
         QueuePost:
           Type: Api
