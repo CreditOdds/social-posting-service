@@ -1,22 +1,23 @@
 const { postToTwitter } = require('./twitter-core');
 
 /**
- * Post to the @card_wire X account (used for SUB updates).
+ * Card-wire SUB updates now post to the main @creditodds X account.
  *
- * @card_wire has its own Developer App, so it uses its own app key/secret AND
- * access token/secret. If you instead reuse the shared app (TWITTER_API_KEY /
- * TWITTER_API_SECRET), leave TWITTER_CARDWIRE_API_KEY / _SECRET unset and only
- * the access token/secret below are account-specific.
+ * The `twitter_cardwire` platform is kept as a distinct identifier so card-wire
+ * posts retain their special handling (priority 200, immediate publish, blackout
+ * bypass), but the credentials and handle default to the shared @creditodds
+ * account. The TWITTER_CARDWIRE_* env vars remain as optional overrides if a
+ * dedicated account is ever wired back up.
  */
 async function post({ text, linkUrl, imagePath }) {
   return postToTwitter({
     creds: {
       appKey: process.env.TWITTER_CARDWIRE_API_KEY || process.env.TWITTER_API_KEY,
       appSecret: process.env.TWITTER_CARDWIRE_API_SECRET || process.env.TWITTER_API_SECRET,
-      accessToken: process.env.TWITTER_CARDWIRE_ACCESS_TOKEN,
-      accessSecret: process.env.TWITTER_CARDWIRE_ACCESS_TOKEN_SECRET,
+      accessToken: process.env.TWITTER_CARDWIRE_ACCESS_TOKEN || process.env.TWITTER_ACCESS_TOKEN,
+      accessSecret: process.env.TWITTER_CARDWIRE_ACCESS_TOKEN_SECRET || process.env.TWITTER_ACCESS_TOKEN_SECRET,
     },
-    handle: process.env.TWITTER_CARDWIRE_HANDLE || 'card_wire',
+    handle: process.env.TWITTER_CARDWIRE_HANDLE || process.env.TWITTER_HANDLE || 'creditodds',
     text,
     linkUrl,
     imagePath,
