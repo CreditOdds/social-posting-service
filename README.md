@@ -102,7 +102,6 @@ flowchart LR
   Publisher --> Twitter["Twitter/X"]
   Publisher --> Facebook["Facebook"]
   Publisher --> Instagram["Instagram"]
-  Publisher --> Reddit["Reddit S3 feed → Devvit app"]
   Publisher --> LinkedIn["LinkedIn manual URL"]
 ```
 
@@ -209,12 +208,13 @@ Publishing behavior varies by platform:
 - Twitter/X: posts the main text, uploads media if present, and places the link in a reply tweet
 - Facebook: creates a page post, uses a photo post when an image exists, and places the link in a comment
 - Instagram: requires an image and uses the Graph API container/publish flow; links are added as comments
-- Reddit: writes the post to a JSON feed in S3 (`creditodds-reddit-feed`); the Devvit app in [`devvit/`](./devvit) polls the feed every 10 minutes and submits it to r/creditodds (Reddit's Data API no longer accepts new apps, so posting goes through Reddit's Devvit platform instead). Falls back to a prefilled manual submit URL if `REDDIT_FEED_BUCKET` is unset.
 - LinkedIn: generates a prefilled manual share URL instead of API posting
+
+Reddit posting was removed: the Devvit + S3-feed approach never worked (Reddit never approved the Devvit app's external fetch domain), and a self-hosted Data API app is not available to a commercial brand. If Reddit is revisited, use a third-party scheduler that holds its own Reddit access (e.g. Postpone) or post manually.
 
 That means the platform layer is currently mixed:
 
-- automated publishing for Twitter, Facebook, Instagram, and Reddit (via the Devvit feed)
+- automated publishing for Twitter, Facebook, and Instagram
 - human-assisted publishing for LinkedIn
 
 ## API Surface
@@ -276,8 +276,6 @@ Also referenced in code:
 - `INSTAGRAM_ACCOUNT_ID`
 - `TWITTER_HANDLE` (optional, defaults to `creditodds` — used to build post URLs)
 - `TWITTER_CARDWIRE_HANDLE` (optional, defaults to `card_wire`)
-- `REDDIT_SUBREDDIT`
-- `REDDIT_FEED_BUCKET` / `REDDIT_FEED_TOKEN` (S3 feed polled by the Devvit app in [`devvit/`](./devvit))
 - `FIREBASE_PROJECT_ID`
 - `S3_BUCKET`
 - `CDN_DOMAIN`
@@ -360,7 +358,7 @@ Also:
 
 #### Manual-platform results need schema alignment
 
-The publisher records `pending_manual` for manual flows like Reddit and LinkedIn, but the checked-in `social_post_results` migration only defines:
+The publisher records `pending_manual` for manual flows like LinkedIn, but the checked-in `social_post_results` migration only defines:
 
 - `pending`
 - `success`
@@ -433,7 +431,7 @@ Recommended improvements:
 - distinguish `partially_posted` from fully failed
 - persist publish job logs or correlation IDs
 - add idempotency keys to queue ingestion so CI/CD can retry safely
-- record who manually completed LinkedIn/Reddit flows and when
+- record who manually completed LinkedIn flows and when
 
 ### Priority 4: improve observability
 

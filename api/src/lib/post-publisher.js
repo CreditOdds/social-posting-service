@@ -9,12 +9,11 @@ const path = require('path');
 
 const twitter = require('./platforms/twitter');
 const twitterCardwire = require('./platforms/twitter-cardwire');
-const reddit = require('./platforms/reddit');
 const facebook = require('./platforms/facebook');
 const instagram = require('./platforms/instagram');
 const linkedin = require('./platforms/linkedin');
 
-const platformModules = { twitter, twitter_cardwire: twitterCardwire, reddit, facebook, instagram, linkedin };
+const platformModules = { twitter, twitter_cardwire: twitterCardwire, facebook, instagram, linkedin };
 
 // Platforms that must be explicitly requested via the post's `platforms` list.
 // They are excluded from the default fan-out so general posts don't leak to

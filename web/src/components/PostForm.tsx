@@ -6,7 +6,7 @@ import { createPost, generatePostText } from '@/lib/api';
 import ImageUpload from './ImageUpload';
 import PlatformBadge from './PlatformBadge';
 
-const ALL_PLATFORMS = ['twitter', 'reddit', 'facebook', 'instagram', 'linkedin'];
+const ALL_PLATFORMS = ['twitter', 'facebook', 'instagram', 'linkedin'];
 
 interface PostFormProps {
   onSuccess?: () => void;
