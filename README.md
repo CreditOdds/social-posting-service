@@ -264,10 +264,6 @@ Declared in [`api/template.yml`](./api/template.yml):
 - `TWITTERAPISECRET`
 - `TWITTERACCESSTOKEN`
 - `TWITTERACCESSTOKENSECRET`
-- `TWITTERCARDWIREAPIKEY` (optional — @card_wire Developer App key; blank reuses the shared app)
-- `TWITTERCARDWIREAPISECRET` (optional — @card_wire Developer App secret; blank reuses the shared app)
-- `TWITTERCARDWIREACCESSTOKEN` (user access token for the @card_wire account)
-- `TWITTERCARDWIREACCESSTOKENSECRET` (user access token secret for @card_wire)
 - `FACEBOOKPAGEID`
 - `FACEBOOKPAGEACCESSTOKEN`
 
@@ -275,7 +271,6 @@ Also referenced in code:
 
 - `INSTAGRAM_ACCOUNT_ID`
 - `TWITTER_HANDLE` (optional, defaults to `creditodds` — used to build post URLs)
-- `TWITTER_CARDWIRE_HANDLE` (optional, defaults to `card_wire`)
 - `FIREBASE_PROJECT_ID`
 - `S3_BUCKET`
 - `CDN_DOMAIN`
