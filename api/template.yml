@@ -45,24 +45,6 @@ Parameters:
     Type: String
     Description: Twitter access token secret
     NoEcho: true
-  TWITTERCARDWIREAPIKEY:
-    Type: String
-    Description: API key for the @card_wire Developer App (leave blank to reuse the shared app)
-    Default: ""
-    NoEcho: true
-  TWITTERCARDWIREAPISECRET:
-    Type: String
-    Description: API secret for the @card_wire Developer App (leave blank to reuse the shared app)
-    Default: ""
-    NoEcho: true
-  TWITTERCARDWIREACCESSTOKEN:
-    Type: String
-    Description: User access token for the @card_wire X account
-    NoEcho: true
-  TWITTERCARDWIREACCESSTOKENSECRET:
-    Type: String
-    Description: User access token secret for the @card_wire X account
-    NoEcho: true
   FACEBOOKPAGEID:
     Type: String
     Description: Facebook Page ID
@@ -228,10 +210,6 @@ Resources:
           TWITTER_API_SECRET: !Ref TWITTERAPISECRET
           TWITTER_ACCESS_TOKEN: !Ref TWITTERACCESSTOKEN
           TWITTER_ACCESS_TOKEN_SECRET: !Ref TWITTERACCESSTOKENSECRET
-          TWITTER_CARDWIRE_API_KEY: !Ref TWITTERCARDWIREAPIKEY
-          TWITTER_CARDWIRE_API_SECRET: !Ref TWITTERCARDWIREAPISECRET
-          TWITTER_CARDWIRE_ACCESS_TOKEN: !Ref TWITTERCARDWIREACCESSTOKEN
-          TWITTER_CARDWIRE_ACCESS_TOKEN_SECRET: !Ref TWITTERCARDWIREACCESSTOKENSECRET
           FACEBOOK_PAGE_ID: !Ref FACEBOOKPAGEID
           FACEBOOK_PAGE_ACCESS_TOKEN: !Ref FACEBOOKPAGEACCESSTOKEN
       Events:
@@ -260,10 +238,6 @@ Resources:
           TWITTER_API_SECRET: !Ref TWITTERAPISECRET
           TWITTER_ACCESS_TOKEN: !Ref TWITTERACCESSTOKEN
           TWITTER_ACCESS_TOKEN_SECRET: !Ref TWITTERACCESSTOKENSECRET
-          TWITTER_CARDWIRE_API_KEY: !Ref TWITTERCARDWIREAPIKEY
-          TWITTER_CARDWIRE_API_SECRET: !Ref TWITTERCARDWIREAPISECRET
-          TWITTER_CARDWIRE_ACCESS_TOKEN: !Ref TWITTERCARDWIREACCESSTOKEN
-          TWITTER_CARDWIRE_ACCESS_TOKEN_SECRET: !Ref TWITTERCARDWIREACCESSTOKENSECRET
           FACEBOOK_PAGE_ID: !Ref FACEBOOKPAGEID
           FACEBOOK_PAGE_ACCESS_TOKEN: !Ref FACEBOOKPAGEACCESSTOKEN
       Events:
