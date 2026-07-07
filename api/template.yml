@@ -72,6 +72,26 @@ Parameters:
     Description: Facebook Page Access Token (long-lived)
     NoEcho: true
     Default: ''
+  VpcPrivateSubnetIds:
+    Type: CommaDelimitedList
+    Description: Private subnets from the creditodds-network stack (main repo, infra/network.yml). All functions attach here so DB traffic egresses from the stack's single NAT EIP.
+    Default: subnet-07c1b621c70d72719,subnet-02aa47f397dd8e08d
+  VpcLambdaSecurityGroupId:
+    Type: String
+    Description: Lambda security group from the creditodds-network stack.
+    Default: sg-06399ba7e0a0b885c
+
+# Every function runs in the creditodds-network VPC (defined in the main
+# monorepo, infra/network.yml) so outbound traffic - the shared Aurora cluster
+# in us-east-1, X/Facebook APIs, Anthropic - leaves via the NAT gateway's
+# static EIP, the only address the database security group allowlists on 3306.
+# SAM adds AWSLambdaVPCAccessExecutionRole automatically when VpcConfig is set.
+Globals:
+  Function:
+    VpcConfig:
+      SecurityGroupIds:
+        - !Ref VpcLambdaSecurityGroupId
+      SubnetIds: !Ref VpcPrivateSubnetIds
 
 Resources:
   # S3 Bucket for social media images
