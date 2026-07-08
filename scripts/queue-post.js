@@ -4,7 +4,11 @@
  * Queue a social media post via the Social Posting Service API.
  * Used by GitHub Actions workflows to queue posts on news/article merges.
  *
- * Usage: node scripts/queue-post.js --type news|article --files <yaml-paths...>
+ * Usage: node scripts/queue-post.js --type news|article [--now] --files <yaml-paths...>
+ *
+ * --now publishes immediately instead of waiting for a queue slot.
+ * Posts are deduplicated by source (type + id), so re-running a workflow
+ * never queues the same item twice.
  *
  * Env vars: SOCIAL_API_URL, SOCIAL_API_KEY, ANTHROPIC_API_KEY
  */
@@ -15,11 +19,14 @@ const yaml = require('js-yaml');
 function parseArgs() {
   const args = process.argv.slice(2);
   let type = null;
+  let publishNow = false;
   const files = [];
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--type' && args[i + 1]) {
       type = args[++i];
+    } else if (args[i] === '--now') {
+      publishNow = true;
     } else if (args[i] === '--files') {
       files.push(...args.slice(i + 1));
       break;
@@ -27,7 +34,7 @@ function parseArgs() {
   }
 
   if (!type || !['news', 'article'].includes(type)) {
-    console.error('Usage: node scripts/queue-post.js --type news|article --files <yaml-paths...>');
+    console.error('Usage: node scripts/queue-post.js --type news|article [--now] --files <yaml-paths...>');
     process.exit(1);
   }
 
@@ -36,7 +43,7 @@ function parseArgs() {
     process.exit(1);
   }
 
-  return { type, files };
+  return { type, files, publishNow };
 }
 
 function buildUrl(type, item) {
@@ -98,7 +105,7 @@ Rules:
   return text;
 }
 
-async function queuePost(textContent, linkUrl, sourceType, sourceId) {
+async function queuePost(textContent, linkUrl, sourceType, sourceId, publishNow) {
   const apiUrl = process.env.SOCIAL_API_URL;
   const apiKey = process.env.SOCIAL_API_KEY;
 
@@ -119,6 +126,8 @@ async function queuePost(textContent, linkUrl, sourceType, sourceId) {
       source_id: sourceId,
       status: 'queued',
       priority: sourceType === 'news' ? 100 : 25,
+      publish_now: publishNow || undefined,
+      idempotency_key: `${sourceType}:${sourceId}`,
     }),
   });
 
@@ -131,7 +140,7 @@ async function queuePost(textContent, linkUrl, sourceType, sourceId) {
 }
 
 async function main() {
-  const { type, files } = parseArgs();
+  const { type, files, publishNow } = parseArgs();
 
   console.log(`=== Queue Social Posts (${type}) ===\n`);
 
@@ -166,8 +175,12 @@ async function main() {
     }
 
     try {
-      const result = await queuePost(postText, url, type, sourceId);
-      console.log(`  Queued successfully! Post ID: ${result.id}\n`);
+      const result = await queuePost(postText, url, type, sourceId, publishNow);
+      if (result.deduped) {
+        console.log(`  Already queued as post ID ${result.id} (status: ${result.status}); skipped.\n`);
+      } else {
+        console.log(`  ${publishNow ? `Published (status: ${result.status})` : 'Queued successfully'}! Post ID: ${result.id}\n`);
+      }
     } catch (err) {
       console.error(`  Failed to queue: ${err.message}\n`);
     }

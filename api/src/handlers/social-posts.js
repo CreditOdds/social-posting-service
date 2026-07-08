@@ -10,33 +10,10 @@ const mysql = require('../lib/db');
 const { isAdmin, getUserId } = require('../lib/admin-check');
 const { success, error, options } = require('../lib/response');
 const { loadSettings } = require('../lib/settings');
-const { isInBlackout, advanceToNextAllowedTick } = require('../lib/blackout');
+const { advanceToNextAllowedTick } = require('../lib/blackout');
+const { parseOptionalInt, normalizeQueueGroup, toDate } = require('../lib/validate');
 
-const SCHEDULER_INTERVAL_MINUTES = 35;
-
-function parseOptionalInt(value, fieldName) {
-  if (value === undefined) return { provided: false };
-  if (value === null || value === '') return { provided: true, value: null };
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return { provided: true, error: `${fieldName} must be a number` };
-  }
-  return { provided: true, value: Math.trunc(parsed) };
-}
-
-function normalizeQueueGroup(value) {
-  if (value === undefined) return { provided: false };
-  if (value === null) return { provided: true, value: null };
-  const trimmed = String(value).trim();
-  return { provided: true, value: trimmed.length > 0 ? trimmed : null };
-}
-
-function toDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
+const SCHEDULER_INTERVAL_MINUTES = 1;
 
 function ceilToInterval(date, intervalMs) {
   return new Date(Math.ceil(date.getTime() / intervalMs) * intervalMs);
@@ -65,6 +42,14 @@ function computeEligibleAt(post, lastPostedAt, lastPostedByGroup, settings, now)
   if (scheduledAt && scheduledAt > eligibleAt) {
     eligibleAt = scheduledAt;
   }
+  const nextAttemptAt = toDate(post.next_attempt_at);
+  if (nextAttemptAt && nextAttemptAt > eligibleAt) {
+    eligibleAt = nextAttemptAt;
+  }
+  // Blackout-exempt posts (card-wire etc.) also bypass spacing gaps.
+  if (post.blackout_exempt) {
+    return eligibleAt;
+  }
   const globalMinGapMinutes = getGlobalMinGapMinutes(settings);
   if (globalMinGapMinutes > 0 && lastPostedAt) {
     const globalGapAt = new Date(lastPostedAt.getTime() + globalMinGapMinutes * 60_000);
@@ -72,8 +57,12 @@ function computeEligibleAt(post, lastPostedAt, lastPostedByGroup, settings, now)
       eligibleAt = globalGapAt;
     }
   }
-  if (post.queue_group && post.min_gap_minutes != null) {
-    const lastPosted = lastPostedByGroup.get(post.queue_group);
+  // Per-post gap: within the queue group when one is set, otherwise against
+  // the most recent post overall — mirrors the scheduler query.
+  if (post.min_gap_minutes != null) {
+    const lastPosted = post.queue_group
+      ? lastPostedByGroup.get(post.queue_group)
+      : lastPostedAt;
     if (lastPosted) {
       const gapAt = new Date(lastPosted.getTime() + post.min_gap_minutes * 60_000);
       if (gapAt > eligibleAt) {
@@ -88,8 +77,15 @@ function estimateQueuedPosts(posts, lastPostedAt, lastPostedByGroup, settings) {
   const now = new Date();
   const intervalMs = SCHEDULER_INTERVAL_MINUTES * 60_000;
   let tick = advanceToNextAllowedTick(ceilToInterval(now, intervalMs), intervalMs, settings?.blackout);
-  const remaining = posts.filter(p => p.status === 'queued');
+  const remaining = posts.filter(p => p.status === 'queued' && !p.blackout_exempt);
   const estimates = new Map();
+
+  // Blackout-exempt posts publish at their own eligibility time, unconstrained
+  // by the window or spacing, so they don't join the simulation below.
+  posts
+    .filter(p => p.status === 'queued' && p.blackout_exempt)
+    .forEach(p => estimates.set(p.id, computeEligibleAt(p, lastPostedAt, lastPostedByGroup, settings, now)));
+
   const lastPosted = new Map(lastPostedByGroup);
   let latestPostedAt = lastPostedAt ? new Date(lastPostedAt) : null;
 
@@ -344,7 +340,7 @@ async function handlePut(event) {
       return error(404, 'Post not found');
     }
 
-    const editableStatuses = ['draft', 'queued', 'failed'];
+    const editableStatuses = ['draft', 'queued', 'failed', 'partial'];
     if (!editableStatuses.includes(existing[0].status)) {
       return error(400, `Cannot edit post with status '${existing[0].status}'`);
     }
@@ -373,6 +369,11 @@ async function handlePut(event) {
     const validStatuses = ['draft', 'queued', 'cancelled'];
     if (newStatus && validStatuses.includes(newStatus)) {
       updates.status = newStatus;
+      // Requeueing a failed/partial post is a fresh start for the retry budget.
+      if (newStatus === 'queued') {
+        updates.attempt_count = 0;
+        updates.next_attempt_at = null;
+      }
     }
 
     if (Object.keys(updates).length === 0) {

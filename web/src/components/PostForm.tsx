@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/auth/AuthProvider';
-import { createPost, generatePostText } from '@/lib/api';
+import { createPost, generatePostText, publishPost } from '@/lib/api';
 import ImageUpload from './ImageUpload';
 import PlatformBadge from './PlatformBadge';
 
@@ -20,6 +20,7 @@ export default function PostForm({ onSuccess }: PostFormProps) {
   const [priority, setPriority] = useState('0');
   const [queueGroup, setQueueGroup] = useState('');
   const [minGapHours, setMinGapHours] = useState('');
+  const [scheduledAt, setScheduledAt] = useState('');
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -49,7 +50,7 @@ export default function PostForm({ onSuccess }: PostFormProps) {
     }
   };
 
-  const handleSubmit = async (status: 'draft' | 'queued') => {
+  const handleSubmit = async (status: 'draft' | 'queued', publishNow = false) => {
     if (!text.trim()) {
       setError('Post text is required');
       return;
@@ -89,7 +90,18 @@ export default function PostForm({ onSuccess }: PostFormProps) {
 
       const trimmedQueueGroup = queueGroup.trim();
 
-      await createPost(token, {
+      let resolvedScheduledAt: string | undefined;
+      if (!publishNow && scheduledAt.trim().length > 0) {
+        const parsed = new Date(scheduledAt);
+        if (Number.isNaN(parsed.getTime())) {
+          setError('Scheduled time is not a valid date');
+          setSaving(false);
+          return;
+        }
+        resolvedScheduledAt = parsed.toISOString();
+      }
+
+      const created = await createPost(token, {
         text_content: text,
         image_url: imageUrl || undefined,
         link_url: linkUrl || undefined,
@@ -98,15 +110,30 @@ export default function PostForm({ onSuccess }: PostFormProps) {
         priority: resolvedPriority,
         queue_group: trimmedQueueGroup.length > 0 ? trimmedQueueGroup : undefined,
         min_gap_minutes: resolvedMinGapMinutes,
+        scheduled_at: resolvedScheduledAt,
       });
 
-      setSuccess(status === 'queued' ? 'Post queued!' : 'Draft saved!');
+      if (publishNow) {
+        const published = await publishPost(token, created.id);
+        if (published.status === 'posted') {
+          setSuccess('Posted!');
+        } else if (published.will_retry) {
+          setSuccess('Publish hit an error; it will retry automatically. Check the queue for details.');
+        } else {
+          setError(`Publish finished with status '${published.status}'. Check the queue for details.`);
+        }
+      } else if (status === 'queued') {
+        setSuccess(resolvedScheduledAt ? 'Post scheduled!' : 'Post queued!');
+      } else {
+        setSuccess('Draft saved!');
+      }
       setText('');
       setLinkUrl('');
       setImageUrl('');
       setPriority('0');
       setQueueGroup('');
       setMinGapHours('');
+      setScheduledAt('');
       setSelectedPlatforms([]);
       setAiTopic('');
       onSuccess?.();
@@ -237,6 +264,22 @@ export default function PostForm({ onSuccess }: PostFormProps) {
         </p>
       </div>
 
+      {/* Schedule */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Schedule for <span className="text-gray-400 text-xs">(optional — leave blank to post at the next open slot)</span>
+        </label>
+        <input
+          type="datetime-local"
+          value={scheduledAt}
+          onChange={e => setScheduledAt(e.target.value)}
+          className="rounded-md border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+        />
+        <p className="mt-2 text-xs text-gray-400">
+          Scheduled posts publish within a minute of the chosen time (blackout window and spacing permitting).
+        </p>
+      </div>
+
       {/* Error/success messages */}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {success && <p className="text-sm text-green-600">{success}</p>}
@@ -255,7 +298,14 @@ export default function PostForm({ onSuccess }: PostFormProps) {
           disabled={saving}
           className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 disabled:opacity-50"
         >
-          {saving ? 'Saving...' : 'Queue Post'}
+          {saving ? 'Saving...' : scheduledAt.trim() ? 'Schedule Post' : 'Queue Post'}
+        </button>
+        <button
+          onClick={() => handleSubmit('queued', true)}
+          disabled={saving}
+          className="px-4 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Post Now'}
         </button>
       </div>
     </div>

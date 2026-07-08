@@ -8,6 +8,7 @@ import { useAuth } from '@/auth/AuthProvider';
 const navLinks = [
   { href: '/', label: 'Queue' },
   { href: '/compose', label: 'Compose' },
+  { href: '/evergreen', label: 'Evergreen' },
   { href: '/history', label: 'History' },
   { href: '/accounts', label: 'Accounts' },
   { href: '/settings', label: 'Settings' },
