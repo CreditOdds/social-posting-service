@@ -508,10 +508,17 @@ Resources:
             Auth:
               Authorizer: NONE
 
+  # Owned by the stack so the metric filter below can attach before the
+  # function's first invocation (Lambda would otherwise create it lazily).
+  SocialSchedulerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${SocialSchedulerFunction}"
+
   SocialSchedulerErrorMetricFilter:
     Type: AWS::Logs::MetricFilter
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${SocialSchedulerFunction}"
+      LogGroupName: !Ref SocialSchedulerLogGroup
       FilterPattern: '"Scheduler error:"'
       MetricTransformations:
         - MetricNamespace: CreditOdds/SocialPosting
