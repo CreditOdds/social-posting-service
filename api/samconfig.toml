@@ -3,9 +3,12 @@ version = 0.1
 [default.deploy]
 [default.deploy.parameters]
 stack_name = "CreditOddsSocialPostingService"
-s3_bucket = "codepipeline-us-east-2-534542813767"
+# us-east-1 is the active region (co-located with the Aurora cluster inside
+# the shared VPC). The us-east-2 stack is retired: its scheduler is disabled
+# and it should not be deployed to.
+region = "us-east-1"
+resolve_s3 = true
 s3_prefix = "CreditOddsSocialPostingService"
-region = "us-east-2"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 disable_rollback = true
