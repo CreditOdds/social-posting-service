@@ -74,18 +74,39 @@ Parameters:
     Default: ''
   VpcPrivateSubnetIds:
     Type: CommaDelimitedList
-    Description: Private subnets from the creditodds-network stack (main repo, infra/network.yml). All functions attach here so DB traffic egresses from the stack's single NAT EIP.
-    Default: subnet-07c1b621c70d72719,subnet-02aa47f397dd8e08d
+    Description: NAT-routed private subnets the functions attach to. Defaults are the shared us-east-1 VPC (vpc-0cc30471) next to the database; the retired us-east-2 stack used the creditodds-network subnets.
+    Default: subnet-38dcb136,subnet-7a936d4b
   VpcLambdaSecurityGroupId:
     Type: String
-    Description: Lambda security group from the creditodds-network stack.
-    Default: sg-06399ba7e0a0b885c
+    Description: Security group for the functions. Default is the shared VPC's self-referencing default SG, which is what grants database access.
+    Default: sg-d83c41e6
+  # The images bucket name and its CloudFront distribution are globally
+  # unique, so only ONE stack (originally the us-east-2 one) can own them.
+  # A stack in another region deploys with CreateStorage=false and points at
+  # the existing bucket/CDN instead of creating its own.
+  CreateStorage:
+    Type: String
+    Description: Whether this stack creates the social-images S3 bucket + CloudFront CDN, or references existing ones.
+    Default: "true"
+    AllowedValues: ["true", "false"]
+  ExistingSocialImagesBucket:
+    Type: String
+    Description: Bucket name to use when CreateStorage=false.
+    Default: creditodds-social-images
+  ExistingCdnDomain:
+    Type: String
+    Description: CloudFront domain to use when CreateStorage=false.
+    Default: d2rswc0dd0ndyt.cloudfront.net
+  SchedulerEnabled:
+    Type: String
+    Description: Whether the 35-minute publisher schedule fires in this region. Keep "false" until this region owns publishing (see comment on ScheduleRule).
+    Default: "true"
+    AllowedValues: ["true", "false"]
 
-# Every function runs in the creditodds-network VPC (defined in the main
-# monorepo, infra/network.yml) so outbound traffic - the shared Aurora cluster
-# in us-east-1, X/Facebook APIs, Anthropic - leaves via the NAT gateway's
-# static EIP, the only address the database security group allowlists on 3306.
-# SAM adds AWSLambdaVPCAccessExecutionRole automatically when VpcConfig is set.
+# Every function runs inside a VPC. In us-east-1 (current) that is the shared
+# VPC next to the Aurora cluster, so DB traffic stays private in-VPC and
+# internet egress uses the VPC's existing NAT. SAM adds
+# AWSLambdaVPCAccessExecutionRole automatically when VpcConfig is set.
 Globals:
   Function:
     VpcConfig:
@@ -93,10 +114,15 @@ Globals:
         - !Ref VpcLambdaSecurityGroupId
       SubnetIds: !Ref VpcPrivateSubnetIds
 
+Conditions:
+  ShouldCreateStorage: !Equals [!Ref CreateStorage, "true"]
+  SchedulerOn: !Equals [!Ref SchedulerEnabled, "true"]
+
 Resources:
   # S3 Bucket for social media images
   SocialImagesBucket:
     Type: AWS::S3::Bucket
+    Condition: ShouldCreateStorage
     Properties:
       BucketName: creditodds-social-images
       CorsConfiguration:
@@ -109,6 +135,7 @@ Resources:
   # Origin Access Control for CloudFront → S3
   SocialImagesOAC:
     Type: AWS::CloudFront::OriginAccessControl
+    Condition: ShouldCreateStorage
     Properties:
       OriginAccessControlConfig:
         Name: social-images-oac
@@ -119,6 +146,7 @@ Resources:
   # S3 bucket policy granting CloudFront read access
   SocialImagesBucketPolicy:
     Type: AWS::S3::BucketPolicy
+    Condition: ShouldCreateStorage
     Properties:
       Bucket: !Ref SocialImagesBucket
       PolicyDocument:
@@ -137,6 +165,7 @@ Resources:
   # CloudFront for image CDN
   SocialImagesCDN:
     Type: AWS::CloudFront::Distribution
+    Condition: ShouldCreateStorage
     Properties:
       DistributionConfig:
         Origins:
@@ -260,7 +289,9 @@ Resources:
           Properties:
             Schedule: rate(35 minutes)
             Description: Post next queued social media post every 35 minutes
-            Enabled: true
+            # Exactly one region's scheduler may be enabled at a time — two
+            # would race on the same DB queue and double-post to X/Facebook.
+            Enabled: !If [SchedulerOn, true, false]
 
   SocialPublishFunction:
     Type: AWS::Serverless::Function
@@ -411,11 +442,11 @@ Resources:
       Description: Generate presigned S3 URLs for image upload
       Environment:
         Variables:
-          S3_BUCKET: !Ref SocialImagesBucket
-          CDN_DOMAIN: !GetAtt SocialImagesCDN.DomainName
+          S3_BUCKET: !If [ShouldCreateStorage, !Ref SocialImagesBucket, !Ref ExistingSocialImagesBucket]
+          CDN_DOMAIN: !If [ShouldCreateStorage, !GetAtt SocialImagesCDN.DomainName, !Ref ExistingCdnDomain]
       Policies:
         - S3CrudPolicy:
-            BucketName: !Ref SocialImagesBucket
+            BucketName: !If [ShouldCreateStorage, !Ref SocialImagesBucket, !Ref ExistingSocialImagesBucket]
       Events:
         Upload:
           Type: Api
@@ -447,14 +478,14 @@ Resources:
           USERNAME: !Ref USERNAME
           PASSWORD: !Ref PASSWORD
           SOCIAL_API_KEY: !Ref SOCIALAPIKEY
-          S3_BUCKET: !Ref SocialImagesBucket
-          CDN_DOMAIN: !GetAtt SocialImagesCDN.DomainName
+          S3_BUCKET: !If [ShouldCreateStorage, !Ref SocialImagesBucket, !Ref ExistingSocialImagesBucket]
+          CDN_DOMAIN: !If [ShouldCreateStorage, !GetAtt SocialImagesCDN.DomainName, !Ref ExistingCdnDomain]
           # Lets the queue handler kick the scheduler the instant a card-wire
           # post lands, so it publishes immediately instead of on the next tick.
           SCHEDULER_FUNCTION_NAME: !Ref SocialSchedulerFunction
       Policies:
         - S3CrudPolicy:
-            BucketName: !Ref SocialImagesBucket
+            BucketName: !If [ShouldCreateStorage, !Ref SocialImagesBucket, !Ref ExistingSocialImagesBucket]
         - LambdaInvokePolicy:
             FunctionName: !Ref SocialSchedulerFunction
       Events:
@@ -505,7 +536,7 @@ Outputs:
     Value: !Sub "https://${SocialPostingAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
   SocialImagesBucketName:
     Description: S3 bucket for social images
-    Value: !Ref SocialImagesBucket
+    Value: !If [ShouldCreateStorage, !Ref SocialImagesBucket, !Ref ExistingSocialImagesBucket]
   SocialImagesCDNDomain:
     Description: CloudFront domain for social images
-    Value: !GetAtt SocialImagesCDN.DomainName
+    Value: !If [ShouldCreateStorage, !GetAtt SocialImagesCDN.DomainName, !Ref ExistingCdnDomain]
