@@ -293,7 +293,10 @@ Resources:
             Description: Post next queued social media post every 35 minutes
             # Exactly one region's scheduler may be enabled at a time — two
             # would race on the same DB queue and double-post to X/Facebook.
-            Enabled: !If [SchedulerOn, true, false]
+            # Must be State (passed through to the Events::Rule), NOT Enabled:
+            # the SAM transform needs Enabled as a literal boolean and silently
+            # deploys ENABLED when handed an intrinsic.
+            State: !If [SchedulerOn, ENABLED, DISABLED]
 
   SocialPublishFunction:
     Type: AWS::Serverless::Function
