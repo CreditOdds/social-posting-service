@@ -57,11 +57,13 @@ Parameters:
     NoEcho: true
   TWITTERCARDWIREACCESSTOKEN:
     Type: String
-    Description: User access token for the @card_wire X account
+    Description: User access token for the @card_wire X account (leave blank to reuse the shared app)
+    Default: ""
     NoEcho: true
   TWITTERCARDWIREACCESSTOKENSECRET:
     Type: String
-    Description: User access token secret for the @card_wire X account
+    Description: User access token secret for the @card_wire X account (leave blank to reuse the shared app)
+    Default: ""
     NoEcho: true
   FACEBOOKPAGEID:
     Type: String
