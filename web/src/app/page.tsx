@@ -108,7 +108,7 @@ export default function DashboardPage() {
   // Stats summary
   const queued = posts.filter(p => p.status === 'queued').length;
   const drafts = posts.filter(p => p.status === 'draft').length;
-  const failed = posts.filter(p => p.status === 'failed').length;
+  const failed = posts.filter(p => p.status === 'failed' || p.status === 'partial').length;
 
   return (
     <div>
@@ -146,6 +146,7 @@ export default function DashboardPage() {
           <option value="queued">Queued</option>
           <option value="draft">Drafts</option>
           <option value="posted">Posted</option>
+          <option value="partial">Partial</option>
           <option value="failed">Failed</option>
           <option value="cancelled">Cancelled</option>
         </select>

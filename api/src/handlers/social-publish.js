@@ -27,15 +27,19 @@ exports.handler = async (event) => {
       return error(400, 'id is required');
     }
 
-    // Claim the post — must be queued or failed
+    // Claim the post and reset its retry budget — a manual publish is a fresh
+    // start. Prior platform results are kept: publishPost skips platforms
+    // that already succeeded, so retries never double-post.
     const lockResult = await mysql.query(
-      "UPDATE social_posts SET status = 'posting' WHERE id = ? AND status IN ('queued', 'failed')",
+      `UPDATE social_posts
+       SET status = 'posting', attempt_count = 0, next_attempt_at = NULL
+       WHERE id = ? AND status IN ('queued', 'failed', 'partial')`,
       [id]
     );
 
     if (lockResult.affectedRows === 0) {
       await mysql.end();
-      return error(400, 'Post not found or not in a publishable state (must be queued or failed)');
+      return error(400, 'Post not found or not in a publishable state (must be queued, failed, or partial)');
     }
 
     const [post] = await mysql.query('SELECT * FROM social_posts WHERE id = ?', [id]);
@@ -44,16 +48,19 @@ exports.handler = async (event) => {
       return error(404, 'Post not found');
     }
 
-    // Clear any previous results (for retries)
-    await mysql.query('DELETE FROM social_post_results WHERE post_id = ?', [id]);
-
     console.log(`Manual publish of post ${post.id}: ${post.text_content.substring(0, 50)}...`);
 
-    const { finalStatus, results } = await publishPost(post, mysql);
+    const { finalStatus, results, willRetry, nextAttemptAt } = await publishPost(post, mysql);
 
     await mysql.end();
 
-    return success({ id: post.id, status: finalStatus, results });
+    return success({
+      id: post.id,
+      status: finalStatus,
+      results,
+      will_retry: willRetry,
+      next_attempt_at: nextAttemptAt ? nextAttemptAt.toISOString() : null,
+    });
   } catch (err) {
     console.error('Publish error:', err);
     await mysql.end();

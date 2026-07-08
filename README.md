@@ -4,10 +4,12 @@ CreditOdds' social posting service is a small publishing system built around:
 
 - A Next.js admin dashboard for manual drafting, queueing, review, and one-click publishing
 - A SAM-deployed Lambda API for CRUD, upload, AI generation, scheduling, and platform fan-out
-- A MySQL-backed queue that decides what should publish next
-- An API-key endpoint for CI/CD or other automation to enqueue posts without going through the UI
+- A MySQL-backed queue that decides what should publish next, drained by an every-minute scheduler
+- An API-key endpoint for CI/CD or other automation to enqueue (or immediately publish) posts without going through the UI
+- An evergreen content pool that re-queues recycled posts on a daily/weekly/monthly cadence
+- Slack notifications for publish failures, retries, and stuck posts
 
-The service already supports more than a simple FIFO queue. Posts can be prioritized, assigned to queue groups, spaced apart, delayed until `scheduled_at`, and blocked during blackout windows.
+Posts can be prioritized, assigned to queue groups, spaced apart, scheduled to the minute with `scheduled_at`, blocked during blackout windows, and retried automatically with backoff when a platform fails.
 
 ## What It Does
 
@@ -18,27 +20,17 @@ There are two main ways to interact with the system:
 The web app in [`web/`](./web) is for authenticated admins.
 
 - `/` shows the queue, drafts, failures, and quick actions
-- `/compose` creates draft or queued posts
+- `/compose` creates draft, queued, scheduled, or immediately-published posts
+- `/evergreen` manages the recycled content pool and its cadences
 - `/history` shows previously posted content
 - `/accounts` enables or disables platform accounts
 - `/settings` controls blackout windows and global queue spacing
 
-Today the compose UI exposes:
-
-- post text
-- optional image
-- optional link
-- optional platform selection
-- queue priority
-- optional queue group
-- optional per-post minimum gap
-- AI-assisted text generation
-
-The admin post API supports `scheduled_at`, but the current compose form does not expose it yet.
+The compose UI exposes post text, optional image/link, platform selection, queue priority, queue group, per-post minimum gap, an exact `scheduled_at` time, AI-assisted text generation, and a **Post Now** button that publishes synchronously.
 
 ### 2. Automation / CI queue API
 
-The API endpoint `POST /social/queue` accepts an `x-api-key` and lets external systems enqueue posts directly. This is how CI/CD or content workflows can push social items into the queue without requiring Firebase auth.
+The API endpoint `POST /social/queue` accepts an `x-api-key` and lets external systems enqueue posts directly. This is how CI/CD or content workflows push social items into the queue without requiring Firebase auth.
 
 Example payload:
 
@@ -52,13 +44,19 @@ Example payload:
   "priority": 100,
   "queue_group": "breaking-news",
   "min_gap_minutes": 180,
-  "platforms": ["twitter", "facebook"]
+  "platforms": ["twitter", "facebook"],
+  "scheduled_at": "2026-07-04T14:00:00Z",
+  "idempotency_key": "news:example"
 }
 ```
 
-It can also accept `image_base64` plus `image_mime_type`, upload that image to S3, and store the CDN URL on the queued post.
+Additional options:
 
-Current limitation: the automation queue endpoint does not currently accept `scheduled_at`, so exact-time scheduling is only partially implemented today.
+- `publish_now: true` — insert the post and publish it synchronously; the response contains per-platform results. Mutually exclusive with `scheduled_at`. Publish-now posts bypass the blackout window and spacing gaps (explicit caller intent).
+- `scheduled_at` — exact-time scheduling, honored within a minute (blackout and spacing permitting).
+- `idempotency_key` — safe retries: a repeated key returns the original post (`deduped: true`) instead of double-posting. Enforced by a unique index, so concurrent retries are safe too.
+- `blackout_exempt: true` — let this post publish during the blackout window (card-wire posts get this automatically).
+- `image_base64` + `image_mime_type` — upload an image to S3 and store the CDN URL on the queued post.
 
 ## Architecture
 
@@ -72,7 +70,7 @@ flowchart LR
   Firebase --> Authorizer["Firebase Lambda Authorizer"]
   Authorizer --> APIGW
 
-  CICD["CI/CD or Scripts"] --> QueueAPI["POST /social/queue<br/>x-api-key auth"]
+  CICD["CI/CD or Scripts"] --> QueueAPI["POST /social/queue<br/>x-api-key auth<br/>queue | schedule | publish_now"]
   QueueAPI --> APIGW
 
   APIGW --> Posts["social-posts Lambda"]
@@ -82,27 +80,34 @@ flowchart LR
   APIGW --> Generate["social-generate Lambda"]
   APIGW --> Upload["social-upload Lambda"]
   APIGW --> Queue["social-queue Lambda"]
+  APIGW --> Evergreen["social-evergreen Lambda"]
 
-  Scheduler["EventBridge rule<br/>every 35 minutes"] --> SchedFn["social-scheduler Lambda"]
+  Scheduler["EventBridge rule<br/>every minute"] --> SchedFn["social-scheduler Lambda<br/>reap stuck → evergreen → drain due"]
 
   Posts --> DB[("MySQL")]
   Publish --> DB
   Accounts --> DB
   Settings --> DB
   Queue --> DB
+  Evergreen --> DB
   SchedFn --> DB
 
   Upload --> S3["S3 image bucket"]
   Queue --> S3
   S3 --> CDN["CloudFront CDN"]
 
-  Publish --> Publisher["shared post-publisher"]
+  Publish --> Publisher["shared post-publisher<br/>per-platform retry state"]
+  Queue -- publish_now --> Publisher
   SchedFn --> Publisher
 
   Publisher --> Twitter["Twitter/X"]
   Publisher --> Facebook["Facebook"]
   Publisher --> Instagram["Instagram"]
   Publisher --> LinkedIn["LinkedIn manual URL"]
+  Publisher --> Slack["Slack webhook<br/>failures / retries / recovery"]
+  SchedFn --> Slack
+
+  Alarm["CloudWatch alarm on Lambda Errors"] --> SNS["SNS topic (email)"]
 ```
 
 ### Core components
@@ -114,9 +119,10 @@ The API lives in [`api/`](./api) and is deployed with AWS SAM using [`api/templa
 Main handlers:
 
 - [`api/src/handlers/social-posts.js`](./api/src/handlers/social-posts.js): admin CRUD for posts and queue estimation
-- [`api/src/handlers/social-scheduler.js`](./api/src/handlers/social-scheduler.js): scheduled publisher, triggered every 35 minutes
-- [`api/src/handlers/social-publish.js`](./api/src/handlers/social-publish.js): admin "post now" endpoint
-- [`api/src/handlers/social-queue.js`](./api/src/handlers/social-queue.js): CI/CD queue ingestion via API key
+- [`api/src/handlers/social-scheduler.js`](./api/src/handlers/social-scheduler.js): every-minute tick — reaps stuck posts, materializes due evergreen items, and publishes all currently-due posts (capped per tick)
+- [`api/src/handlers/social-publish.js`](./api/src/handlers/social-publish.js): admin "post now" endpoint; retries only the platforms that haven't succeeded
+- [`api/src/handlers/social-queue.js`](./api/src/handlers/social-queue.js): CI/CD ingestion via API key — queue, schedule, or publish_now, with idempotency
+- [`api/src/handlers/social-evergreen.js`](./api/src/handlers/social-evergreen.js): CRUD for the evergreen content pool
 - [`api/src/handlers/social-upload.js`](./api/src/handlers/social-upload.js): presigned S3 upload URL generation
 - [`api/src/handlers/social-generate.js`](./api/src/handlers/social-generate.js): Anthropic-backed copy generation
 - [`api/src/handlers/social-settings.js`](./api/src/handlers/social-settings.js): blackout window and global queue settings
@@ -125,9 +131,12 @@ Main handlers:
 
 Shared libs:
 
-- [`api/src/lib/post-publisher.js`](./api/src/lib/post-publisher.js): common publish orchestration used by both manual publish and the scheduler
-- [`api/src/lib/blackout.js`](./api/src/lib/blackout.js): blackout-window evaluation and "next valid tick" logic
+- [`api/src/lib/post-publisher.js`](./api/src/lib/post-publisher.js): publish orchestration with per-platform retry state, backoff, and terminal `posted`/`partial`/`failed` statuses
+- [`api/src/lib/notify.js`](./api/src/lib/notify.js): Slack webhook notifications (no-throw; logs when unconfigured)
+- [`api/src/lib/evergreen.js`](./api/src/lib/evergreen.js): cadence math and due-item materialization
+- [`api/src/lib/blackout.js`](./api/src/lib/blackout.js): blackout-window evaluation
 - [`api/src/lib/settings.js`](./api/src/lib/settings.js): default settings and settings loading
+- [`api/src/lib/validate.js`](./api/src/lib/validate.js): shared request-field validation
 - [`api/src/lib/platforms/`](./api/src/lib/platforms): per-platform adapters
 
 #### Frontend
@@ -137,9 +146,10 @@ The admin UI lives in [`web/`](./web) and is a Next.js 15 app with Firebase Auth
 Important frontend files:
 
 - [`web/src/lib/api.ts`](./web/src/lib/api.ts): API client and shared types
-- [`web/src/components/PostForm.tsx`](./web/src/components/PostForm.tsx): manual compose flow
+- [`web/src/components/PostForm.tsx`](./web/src/components/PostForm.tsx): compose flow (queue, schedule, post-now)
 - [`web/src/components/PostCard.tsx`](./web/src/components/PostCard.tsx): queue card, result display, publish actions
 - [`web/src/app/page.tsx`](./web/src/app/page.tsx): queue dashboard
+- [`web/src/app/evergreen/page.tsx`](./web/src/app/evergreen/page.tsx): evergreen pool management
 - [`web/src/app/settings/page.tsx`](./web/src/app/settings/page.tsx): blackout and global spacing controls
 - [`web/src/auth/AuthProvider.tsx`](./web/src/auth/AuthProvider.tsx): Firebase auth and admin gating
 
@@ -149,57 +159,75 @@ The schema is defined by the checked-in SQL migrations in [`migrations/`](./migr
 
 Main tables:
 
-- `social_posts`: the source of truth for queued, draft, posting, posted, failed, and cancelled posts
-- `social_post_results`: one row per platform attempt
+- `social_posts`: the source of truth for every post and its lifecycle status
+- `social_post_results`: one row per platform outcome (`pending`, `success`, `failed`, `pending_manual`)
 - `social_accounts`: platform enablement, connection state, and last error
-- `social_settings`: global settings JSON, currently blackout and queue spacing
+- `social_settings`: global settings JSON (blackout window, queue spacing)
+- `social_evergreen`: the recycled-content pool with per-item cadence and next-run time
 
 Important `social_posts` fields:
 
-- `status`: `draft`, `queued`, `posting`, `posted`, `failed`, `cancelled`
-- `priority`: higher numbers win first
-- `scheduled_at`: post is not eligible until this time
+- `status`: `draft`, `queued`, `posting`, `posted`, `partial`, `failed`, `cancelled` — `partial` means some platforms succeeded and retries are exhausted on the rest
+- `priority`: higher numbers win first (evergreen posts use −10 so news always jumps ahead)
+- `scheduled_at`: post is not eligible until this time; honored within a minute
 - `queue_group`: optional content family or lane, like `evergreen` or `breaking-news`
-- `min_gap_minutes`: optional extra spacing rule within a queue group
-- `platforms`: JSON array of target platforms; `NULL` means "all active connected platforms"
+- `min_gap_minutes`: spacing rule — applies within the queue group when one is set, otherwise against the most recent post overall
+- `platforms`: JSON array of target platforms; `NULL` means "all active connected platforms" (opt-in-only platforms like `twitter_cardwire` are excluded from the default fan-out)
+- `attempt_count` / `next_attempt_at` / `last_error`: retry state (backoff: 5, 15, 45 minutes; 4 attempts total)
+- `blackout_exempt`: urgent-lane flag — skips the blackout window and spacing gaps (card-wire and publish_now posts)
+- `idempotency_key`: unique; lets automation retry enqueues safely
 
 ### Publish lifecycle
 
 #### Manual flow
 
-1. Admin signs in through Firebase.
-2. Web app gets a Firebase ID token.
-3. API Gateway authorizes requests through the custom Firebase authorizer.
-4. Admin creates a draft or queued post through `POST /social/posts`.
-5. Admin can manually force publication through `POST /social/publish`.
-6. The shared publisher fans the post out to all eligible platforms and records per-platform results.
+1. Admin signs in through Firebase; API Gateway authorizes via the custom authorizer.
+2. Admin creates a draft, queued, or scheduled post through `POST /social/posts` — or clicks **Post Now**, which queues and immediately publishes via `POST /social/publish`.
+3. `POST /social/publish` claims the post, resets its retry budget, and fans out to every platform **that hasn't already succeeded** — a retry after a partial failure never double-posts.
 
 #### Automated flow
 
-1. CI/CD or a script calls `POST /social/queue` with the shared API key.
-2. The service stores a queued post immediately.
-3. EventBridge triggers the scheduler every 35 minutes.
-4. The scheduler selects the highest-priority eligible post.
-5. The shared publisher executes the publish and stores results.
+1. CI/CD calls `POST /social/queue` with the shared API key (optionally `scheduled_at`, `publish_now`, `idempotency_key`).
+2. `publish_now` posts publish synchronously in the request; everything else is stored as `queued`.
+3. EventBridge triggers the scheduler every minute. Each tick it:
+   - resets posts stuck in `posting` (a crashed invocation) back to `queued`, or `failed` when retries are exhausted, with a Slack alert
+   - enqueues due evergreen items
+   - publishes every currently-due post in priority order, up to 5 per tick, so gap rules stay exact
+4. Card-wire posts additionally get an immediate scheduler kick so they publish within seconds.
+
+#### Failure handling
+
+- Each platform outcome is recorded in `social_post_results`; a failure on one platform doesn't block others.
+- A post with any failure requeues itself with backoff (5/15/45 min) until 4 attempts are used, then goes terminal: `partial` if anything succeeded, `failed` otherwise.
+- Every failure, retry, recovery, terminal failure, and stuck-post reap posts a message to the Slack webhook (`SLACKWEBHOOKURL`). Without a webhook configured, messages go to CloudWatch logs.
+- A scheduler crash rethrows, so the CloudWatch alarm on the Lambda `Errors` metric fires and notifies the SNS topic (subscribe via `ALARMEMAIL`).
 
 ### Queue selection rules
 
-The scheduler does not just post the oldest row. A post is eligible only when all of these are satisfied:
+A post is eligible only when all of these are satisfied:
 
 - status is `queued`
 - `scheduled_at` is null or already in the past
-- the current time is not inside the configured blackout window
-- the global minimum gap has elapsed since the most recent posted item
-- if the post has a `queue_group` and `min_gap_minutes`, that group-specific gap has elapsed
+- `next_attempt_at` (retry backoff) is null or already in the past
+- **either** the post is `blackout_exempt`, **or** all of:
+  - the current time is not inside the configured blackout window
+  - the global minimum gap has elapsed since the most recent posted item
+  - the post's `min_gap_minutes` has elapsed within its queue group (or overall, when it has no group)
 
-If multiple posts are eligible, selection order is:
+If multiple posts are eligible, selection order is: highest `priority`, then earliest `scheduled_at`, then earliest `created_at`.
 
-1. highest `priority`
-2. earliest `scheduled_at`
-3. earliest `created_at`
+The queue dashboard estimates future publish times for queued posts using the same eligibility rules on a one-minute grid. Estimates are computed at read time and are advisory.
 
-The queue dashboard also estimates future publish times for queued posts using the same spacing and blackout logic.
-Those estimates are computed at read time, not stored as scheduled jobs, so they should be treated as advisory.
+### Evergreen posts
+
+Evergreen items live in `social_evergreen` and are managed from `/evergreen` (or `GET/POST/PUT/DELETE /social/evergreen`). Each item has:
+
+- content (text, optional Twitter override, image, link, platforms)
+- a cadence: `daily`, `weekly`, or `monthly`
+- an optional preferred local time-of-day (interpreted in the blackout timezone)
+- an active flag, usage counter, and `next_run_at`
+
+Every scheduler tick, due items are inserted into `social_posts` as ordinary queue rows (`source_type: 'evergreen'`, priority −10, queue group `evergreen` with a 2-hour intra-group gap), so blackout, spacing, and priority all apply. If the previous evergreen post is still waiting in the queue, the cycle is skipped instead of piling up duplicates.
 
 ## Platform Behavior
 
@@ -208,28 +236,19 @@ Publishing behavior varies by platform:
 - Twitter/X: posts the main text, uploads media if present, and places the link in a reply tweet
 - Facebook: creates a page post, uses a photo post when an image exists, and places the link in a comment
 - Instagram: requires an image and uses the Graph API container/publish flow; links are added as comments
-- LinkedIn: generates a prefilled manual share URL instead of API posting
+- LinkedIn: generates a prefilled manual share URL instead of API posting (recorded as `pending_manual`)
 
 Reddit posting was removed: the Devvit + S3-feed approach never worked (Reddit never approved the Devvit app's external fetch domain), and a self-hosted Data API app is not available to a commercial brand. If Reddit is revisited, use a third-party scheduler that holds its own Reddit access (e.g. Postpone) or post manually.
-
-That means the platform layer is currently mixed:
-
-- automated publishing for Twitter, Facebook, and Instagram
-- human-assisted publishing for LinkedIn
 
 ## API Surface
 
 Admin-authenticated endpoints:
 
-- `GET /social/posts`
-- `POST /social/posts`
-- `PUT /social/posts`
-- `DELETE /social/posts`
+- `GET/POST/PUT/DELETE /social/posts`
 - `POST /social/publish`
-- `GET /social/accounts`
-- `PUT /social/accounts`
-- `GET /social/settings`
-- `PUT /social/settings`
+- `GET/POST/PUT/DELETE /social/evergreen`
+- `GET/PUT /social/accounts`
+- `GET/PUT /social/settings`
 - `POST /social/generate`
 - `POST /social/upload`
 
@@ -241,12 +260,15 @@ API-key endpoint:
 
 ### Database migrations
 
-Apply the SQL files in [`migrations/`](./migrations) to the existing MySQL database:
+Apply the SQL files in [`migrations/`](./migrations) in order:
 
-1. [`migrations/001_create_social_tables.sql`](./migrations/001_create_social_tables.sql)
-2. [`migrations/002_add_queue_priority_spacing.sql`](./migrations/002_add_queue_priority_spacing.sql)
-3. [`migrations/003_add_social_settings.sql`](./migrations/003_add_social_settings.sql)
-4. [`migrations/004_add_twitter_text.sql`](./migrations/004_add_twitter_text.sql)
+1. [`001_create_social_tables.sql`](./migrations/001_create_social_tables.sql)
+2. [`002_add_queue_priority_spacing.sql`](./migrations/002_add_queue_priority_spacing.sql)
+3. [`003_add_social_settings.sql`](./migrations/003_add_social_settings.sql)
+4. [`004_add_twitter_text.sql`](./migrations/004_add_twitter_text.sql)
+5. [`005_add_cardwire_account.sql`](./migrations/005_add_cardwire_account.sql)
+6. [`006_add_retry_partial_blackout.sql`](./migrations/006_add_retry_partial_blackout.sql)
+7. [`007_add_evergreen.sql`](./migrations/007_add_evergreen.sql)
 
 If you are applying these to a fresh environment, check for overlap first. `001_create_social_tables.sql` already includes fields and tables that later migrations also introduce.
 
@@ -254,33 +276,22 @@ If you are applying these to a fresh environment, check for overlap first. `001_
 
 Declared in [`api/template.yml`](./api/template.yml):
 
-- `ENDPOINT`
-- `DATABASE`
-- `USERNAME`
-- `PASSWORD`
+- `ENDPOINT`, `DATABASE`, `USERNAME`, `PASSWORD` (MySQL)
 - `ANTHROPICAPIKEY`
-- `SOCIALAPIKEY`
-- `TWITTERAPIKEY`
-- `TWITTERAPISECRET`
-- `TWITTERACCESSTOKEN`
-- `TWITTERACCESSTOKENSECRET`
-- `TWITTERCARDWIREAPIKEY` (optional — @card_wire Developer App key; blank reuses the shared app)
-- `TWITTERCARDWIREAPISECRET` (optional — @card_wire Developer App secret; blank reuses the shared app)
-- `TWITTERCARDWIREACCESSTOKEN` (user access token for the @card_wire account)
-- `TWITTERCARDWIREACCESSTOKENSECRET` (user access token secret for @card_wire)
-- `FACEBOOKPAGEID`
-- `FACEBOOKPAGEACCESSTOKEN`
+- `SOCIALAPIKEY` (queue endpoint auth)
+- `TWITTERAPIKEY`, `TWITTERAPISECRET`, `TWITTERACCESSTOKEN`, `TWITTERACCESSTOKENSECRET`
+- `TWITTERCARDWIREAPIKEY`, `TWITTERCARDWIREAPISECRET` (optional — blank reuses the shared app)
+- `TWITTERCARDWIREACCESSTOKEN`, `TWITTERCARDWIREACCESSTOKENSECRET` (@card_wire user tokens)
+- `FACEBOOKPAGEID`, `FACEBOOKPAGEACCESSTOKEN`
+- `SLACKWEBHOOKURL` (optional — Slack incoming webhook for failure notifications; blank logs to CloudWatch only)
+- `ALARMEMAIL` (optional — email subscription for the scheduler error alarm)
 
 Also referenced in code:
 
-- `INSTAGRAM_ACCOUNT_ID`
-- `TWITTER_HANDLE` (optional, defaults to `creditodds` — used to build post URLs)
+- `INSTAGRAM_ACCOUNT_ID` (used by the Instagram adapter but not currently declared as a SAM parameter)
+- `TWITTER_HANDLE` (optional, defaults to `creditodds`)
 - `TWITTER_CARDWIRE_HANDLE` (optional, defaults to `card_wire`)
-- `FIREBASE_PROJECT_ID`
-- `S3_BUCKET`
-- `CDN_DOMAIN`
-
-Note that `INSTAGRAM_ACCOUNT_ID` is used by the Instagram adapter but is not currently declared as a SAM parameter in `template.yml`.
+- `FIREBASE_PROJECT_ID`, `S3_BUCKET`, `CDN_DOMAIN`
 
 ### Web environment variables
 
@@ -313,8 +324,6 @@ sam build
 sam local start-api
 ```
 
-Current-state note: this repo does not include a dedicated local API dev script beyond the SAM template, so local backend iteration is currently more deployment-oriented than developer-optimized.
-
 ### Deployment
 
 The backend is designed for AWS SAM deployment from [`api/`](./api):
@@ -330,144 +339,11 @@ The checked-in [`api/samconfig.toml`](./api/samconfig.toml) targets:
 - stack: `CreditOddsSocialPostingService`
 - region: `us-east-2`
 
-## Current Design Review
+Deploys after the retry/evergreen upgrade must supply values (or accept blanks) for the new `SLACKWEBHOOKURL` and `ALARMEMAIL` parameters, and migrations 006–007 must be applied before the new scheduler goes live.
 
-### What is working well
+## Known Gaps
 
-- The service is small and easy to reason about.
-- The queue model already supports more sophistication than a basic scheduler.
-- Shared publish logic avoids duplicating platform orchestration.
-- The separation between admin-authenticated endpoints and API-key automation is clean.
-- Storing per-platform results makes failures visible in the UI.
-- The estimated publish time feature gives the queue real operational value.
-
-### Current limitations and design gaps
-
-#### Exact-time scheduling is not truly exact yet
-
-The admin post API supports `scheduled_at`, but the scheduler only runs every 35 minutes. In practice that means:
-
-- posts are published on the next scheduler tick, not at the exact requested time
-- blackout windows and spacing rules can push posts later than expected
-- there is no SLA-like guarantee around minute-level timing
-
-Also:
-
-- the current compose UI does not let an admin set `scheduled_at`
-- the automation queue endpoint does not accept `scheduled_at`
-
-#### Manual-platform results need schema alignment
-
-The publisher records `pending_manual` for manual flows like LinkedIn, but the checked-in `social_post_results` migration only defines:
-
-- `pending`
-- `success`
-- `failed`
-
-If production schema has not already been updated elsewhere, this is a mismatch that should be fixed with a migration.
-
-#### Platform configuration is partly code-based
-
-Some account capability is represented in the database (`social_accounts`), but actual credentials and behavior still live in Lambda environment variables and code paths. That makes the account model operationally useful, but not fully self-describing.
-
-#### The scheduler is coarse-grained
-
-Running every 35 minutes is simple, but it creates tradeoffs:
-
-- weaker timing precision
-- slower retry behavior
-- larger gaps between failure detection and recovery
-- limited room for bursty or campaign-style scheduling
-
-#### Local development and test coverage are thin
-
-The repo currently has:
-
-- no checked-in automated tests for queue logic or publish orchestration
-- no dedicated local backend workflow beyond SAM
-- no integration harness for exercising platform adapters safely
-
-## Recommended Upgrades
-
-### Priority 1: support true scheduled posting
-
-If specific publish times matter, this is the biggest improvement to make.
-
-Recommended options:
-
-1. Add `scheduled_at` to the compose UI and extend the automation queue API if external systems need exact-time scheduling.
-2. Change the scheduler model so exact-time posts do not depend on a 35-minute poll.
-3. Use one of these execution models:
-
-- Best fit: create a one-time EventBridge Scheduler job per post, then fall back to the queue only for backlog arbitration
-- Simpler near-term option: reduce poll frequency to every 1 to 5 minutes
-- More scalable option: move queued posts onto SQS with delayed delivery plus a worker Lambda
-
-My recommendation is a hybrid:
-
-- keep the MySQL queue as the source of truth
-- create one-time execution events for posts with a specific `scheduled_at`
-- reserve the recurring scheduler for unscheduled backlog draining and retries
-
-That keeps the current design mostly intact while making exact-time posting real.
-
-### Priority 2: formalize queue policy
-
-Right now the queue policy is good but implicit.
-
-Upgrades that would help:
-
-- document queue groups as first-class lanes, with naming conventions
-- add per-source defaults in one place
-- add campaign-level or platform-level rate limits
-- support "do not post before X, prefer before Y" windows
-- support per-platform scheduling, not just per-post scheduling
-
-### Priority 3: make publishing more durable
-
-Recommended improvements:
-
-- add attempt counters and retry backoff on `social_posts`
-- distinguish `partially_posted` from fully failed
-- persist publish job logs or correlation IDs
-- add idempotency keys to queue ingestion so CI/CD can retry safely
-- record who manually completed LinkedIn flows and when
-
-### Priority 4: improve observability
-
-Useful additions:
-
-- queue depth and oldest queued age metrics
-- scheduled-post lag metric: actual post time minus requested schedule
-- per-platform success-rate alarms
-- dashboard surfacing for "manual completion required"
-- audit events for create, edit, queue, cancel, publish, retry
-
-### Priority 5: tighten platform abstraction
-
-Recommended cleanup:
-
-- represent platform capabilities explicitly: `automatic`, `manual`, `requires_image`, `supports_link_comment`, and so on
-- move platform metadata into a shared config layer instead of spreading behavior across UI and adapters
-- validate payloads per platform before queueing, not only at publish time
-
-### Priority 6: invest in developer ergonomics
-
-Recommended changes:
-
-- add unit tests for queue ordering, blackout windows, and estimate calculation
-- add integration tests for handler auth and state transitions
-- add a local seed script for social tables and accounts
-- add a fake platform adapter or dry-run mode for safe local testing
-
-## Suggested Near-Term Roadmap
-
-If we wanted the highest-value improvements without rebuilding everything, I would do this in order:
-
-1. Add `scheduled_at` to the UI and, if needed, to the automation queue API.
-2. Add a migration for `pending_manual` if production does not already have it.
-3. Reduce scheduler cadence or introduce one-time scheduled jobs for exact-time posts.
-4. Add basic tests around queue selection and blackout behavior.
-5. Add better queue metrics and manual-completion visibility.
-
-That would materially improve reliability and operator confidence without forcing a full rewrite.
+- No checked-in automated tests for queue selection, retry, or estimate logic.
+- Platform credentials live in CloudFormation parameters/env vars; SSM Parameter Store or Secrets Manager would be cleaner.
+- `INSTAGRAM_ACCOUNT_ID` is used by the Instagram adapter but not declared in the SAM template.
+- Manual LinkedIn completions aren't tracked (who posted, when).

@@ -74,6 +74,15 @@ Parameters:
     Description: Facebook Page Access Token (long-lived)
     NoEcho: true
     Default: ''
+  SLACKWEBHOOKURL:
+    Type: String
+    Description: Slack incoming webhook URL for publish failure notifications (blank = log only)
+    NoEcho: true
+    Default: ''
+  ALARMEMAIL:
+    Type: String
+    Description: Email address subscribed to the scheduler error alarm (blank = no subscription)
+    Default: ''
   VpcPrivateSubnetIds:
     Type: CommaDelimitedList
     Description: NAT-routed private subnets the functions attach to. Defaults are the shared us-east-1 VPC (vpc-0cc30471) next to the database; the retired us-east-2 stack used the creditodds-network subnets.
@@ -101,7 +110,7 @@ Parameters:
     Default: d2rswc0dd0ndyt.cloudfront.net
   SchedulerEnabled:
     Type: String
-    Description: Whether the 35-minute publisher schedule fires in this region. Keep "false" until this region owns publishing (see comment on ScheduleRule).
+    Description: Whether the every-minute publisher schedule fires in this region. Keep "false" until this region owns publishing (see comment on ScheduleRule).
     Default: "true"
     AllowedValues: ["true", "false"]
 
@@ -119,6 +128,7 @@ Globals:
 Conditions:
   ShouldCreateStorage: !Equals [!Ref CreateStorage, "true"]
   SchedulerOn: !Equals [!Ref SchedulerEnabled, "true"]
+  HasAlarmEmail: !Not [!Equals [!Ref ALARMEMAIL, '']]
 
 Resources:
   # S3 Bucket for social media images
@@ -267,8 +277,8 @@ Resources:
       Handler: src/handlers/social-scheduler.handler
       Runtime: nodejs22.x
       MemorySize: 256
-      Timeout: 120
-      Description: Scheduled post publisher - triggered every 35 minutes
+      Timeout: 300
+      Description: Scheduled post publisher - runs every minute, drains all due posts
       Environment:
         Variables:
           ENDPOINT: !Ref ENDPOINT
@@ -285,12 +295,13 @@ Resources:
           TWITTER_CARDWIRE_ACCESS_TOKEN_SECRET: !Ref TWITTERCARDWIREACCESSTOKENSECRET
           FACEBOOK_PAGE_ID: !Ref FACEBOOKPAGEID
           FACEBOOK_PAGE_ACCESS_TOKEN: !Ref FACEBOOKPAGEACCESSTOKEN
+          SLACK_WEBHOOK_URL: !Ref SLACKWEBHOOKURL
       Events:
         ScheduleRule:
           Type: Schedule
           Properties:
-            Schedule: rate(35 minutes)
-            Description: Post next queued social media post every 35 minutes
+            Schedule: cron(* * * * ? *)
+            Description: Publish all due social media posts every minute
             # Exactly one region's scheduler may be enabled at a time — two
             # would race on the same DB queue and double-post to X/Facebook.
             # Must be State (passed through to the Events::Rule), NOT Enabled:
@@ -322,6 +333,7 @@ Resources:
           TWITTER_CARDWIRE_ACCESS_TOKEN_SECRET: !Ref TWITTERCARDWIREACCESSTOKENSECRET
           FACEBOOK_PAGE_ID: !Ref FACEBOOKPAGEID
           FACEBOOK_PAGE_ACCESS_TOKEN: !Ref FACEBOOKPAGEACCESSTOKEN
+          SLACK_WEBHOOK_URL: !Ref SLACKWEBHOOKURL
       Events:
         Publish:
           Type: Api
@@ -473,9 +485,9 @@ Resources:
     Properties:
       Handler: src/handlers/social-queue.handler
       Runtime: nodejs22.x
-      MemorySize: 128
-      Timeout: 30
-      Description: Queue posts from CI/CD (API-key auth, no Firebase)
+      MemorySize: 256
+      Timeout: 120
+      Description: Queue posts from CI/CD (API-key auth, no Firebase); supports publish_now
       Environment:
         Variables:
           ENDPOINT: !Ref ENDPOINT
@@ -488,6 +500,19 @@ Resources:
           # Lets the queue handler kick the scheduler the instant a card-wire
           # post lands, so it publishes immediately instead of on the next tick.
           SCHEDULER_FUNCTION_NAME: !Ref SocialSchedulerFunction
+          # publish_now posts synchronously from this handler, so it needs the
+          # platform credentials too.
+          TWITTER_API_KEY: !Ref TWITTERAPIKEY
+          TWITTER_API_SECRET: !Ref TWITTERAPISECRET
+          TWITTER_ACCESS_TOKEN: !Ref TWITTERACCESSTOKEN
+          TWITTER_ACCESS_TOKEN_SECRET: !Ref TWITTERACCESSTOKENSECRET
+          TWITTER_CARDWIRE_API_KEY: !Ref TWITTERCARDWIREAPIKEY
+          TWITTER_CARDWIRE_API_SECRET: !Ref TWITTERCARDWIREAPISECRET
+          TWITTER_CARDWIRE_ACCESS_TOKEN: !Ref TWITTERCARDWIREACCESSTOKEN
+          TWITTER_CARDWIRE_ACCESS_TOKEN_SECRET: !Ref TWITTERCARDWIREACCESSTOKENSECRET
+          FACEBOOK_PAGE_ID: !Ref FACEBOOKPAGEID
+          FACEBOOK_PAGE_ACCESS_TOKEN: !Ref FACEBOOKPAGEACCESSTOKEN
+          SLACK_WEBHOOK_URL: !Ref SLACKWEBHOOKURL
       Policies:
         - S3CrudPolicy:
             BucketName: !If [ShouldCreateStorage, !Ref SocialImagesBucket, !Ref ExistingSocialImagesBucket]
@@ -511,36 +536,96 @@ Resources:
             Auth:
               Authorizer: NONE
 
-  # Owned by the stack so the metric filter below can attach before the
-  # function's first invocation (Lambda would otherwise create it lazily).
+  SocialEvergreenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/social-evergreen.handler
+      Runtime: nodejs22.x
+      MemorySize: 128
+      Timeout: 30
+      Description: CRUD for the evergreen content pool
+      Environment:
+        Variables:
+          ENDPOINT: !Ref ENDPOINT
+          DATABASE: !Ref DATABASE
+          USERNAME: !Ref USERNAME
+          PASSWORD: !Ref PASSWORD
+      Events:
+        GetEvergreen:
+          Type: Api
+          Properties:
+            Path: /social/evergreen
+            Method: GET
+            RestApiId: !Ref SocialPostingAPI
+        CreateEvergreen:
+          Type: Api
+          Properties:
+            Path: /social/evergreen
+            Method: POST
+            RestApiId: !Ref SocialPostingAPI
+        UpdateEvergreen:
+          Type: Api
+          Properties:
+            Path: /social/evergreen
+            Method: PUT
+            RestApiId: !Ref SocialPostingAPI
+        DeleteEvergreen:
+          Type: Api
+          Properties:
+            Path: /social/evergreen
+            Method: DELETE
+            RestApiId: !Ref SocialPostingAPI
+        EvergreenOptions:
+          Type: Api
+          Properties:
+            Path: /social/evergreen
+            Method: OPTIONS
+            RestApiId: !Ref SocialPostingAPI
+            Auth:
+              Authorizer: NONE
+
+  # Owned by the stack so alarms/retention are in place before the function's
+  # first invocation (Lambda would otherwise create it lazily).
   SocialSchedulerLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${SocialSchedulerFunction}"
 
-  SocialSchedulerErrorMetricFilter:
-    Type: AWS::Logs::MetricFilter
+  # Infra-level backstop for the Slack notifications baked into the handlers:
+  # the scheduler rethrows on crash, so the Lambda Errors metric catches it.
+  SchedulerAlarmTopic:
+    Type: AWS::SNS::Topic
     Properties:
-      LogGroupName: !Ref SocialSchedulerLogGroup
-      FilterPattern: '"Scheduler error:"'
-      MetricTransformations:
-        - MetricNamespace: CreditOdds/SocialPosting
-          MetricName: SocialSchedulerErrors
-          MetricValue: "1"
+      TopicName: !Sub "${AWS::StackName}-scheduler-alarms"
+
+  SchedulerAlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref SchedulerAlarmTopic
+      Protocol: email
+      Endpoint: !Ref ALARMEMAIL
 
   SocialSchedulerErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "${AWS::StackName}-SocialSchedulerErrors"
-      AlarmDescription: Alarm when the social scheduler logs repeated errors.
-      Namespace: CreditOdds/SocialPosting
-      MetricName: SocialSchedulerErrors
+      AlarmDescription: The social scheduler Lambda is failing.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SocialSchedulerFunction
       Statistic: Sum
-      Period: 900
+      Period: 300
       EvaluationPeriods: 1
-      Threshold: 2
+      Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SchedulerAlarmTopic
+      OKActions:
+        - !Ref SchedulerAlarmTopic
 
 Outputs:
   SocialPostingAPIUrl:

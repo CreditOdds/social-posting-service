@@ -14,10 +14,10 @@ interface PostCardProps {
 }
 
 export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry, onPublish }: PostCardProps) {
-  const canEdit = ['draft', 'queued', 'failed'].includes(post.status);
+  const canEdit = ['draft', 'queued', 'failed', 'partial'].includes(post.status);
   const canQueue = post.status === 'draft';
-  const canRetry = post.status === 'failed';
-  const canPublish = ['queued', 'failed'].includes(post.status);
+  const canRetry = ['failed', 'partial'].includes(post.status);
+  const canPublish = ['queued', 'failed', 'partial'].includes(post.status);
   const canDelete = post.status !== 'posting';
   const estimatedAt = post.estimated_post_at ? new Date(post.estimated_post_at) : null;
   const estimatedLocal = estimatedAt ? estimatedAt.toLocaleString() : null;
@@ -66,6 +66,17 @@ export default function PostCard({ post, onEdit, onDelete, onQueue, onRetry, onP
               </>
             )}
           </div>
+          {post.status === 'queued' && post.attempt_count > 0 && (
+            <div className="text-xs text-orange-600 mb-2">
+              Attempt {post.attempt_count} failed
+              {post.next_attempt_at && ` — retrying ${new Date(post.next_attempt_at).toLocaleString()}`}
+            </div>
+          )}
+          {['failed', 'partial'].includes(post.status) && post.last_error && (
+            <div className="text-xs text-red-500 mb-2 truncate" title={post.last_error}>
+              {post.last_error}
+            </div>
+          )}
           <p className="text-sm text-gray-900 whitespace-pre-wrap">{post.text_content}</p>
           {(post.priority !== 0 || post.queue_group || post.min_gap_minutes) && (
             <div className="mt-2 text-xs text-gray-500">

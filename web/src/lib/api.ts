@@ -24,9 +24,9 @@ export interface SocialPost {
   text_content: string;
   image_url: string | null;
   link_url: string | null;
-  source_type: 'manual' | 'news' | 'article' | 'api';
+  source_type: 'manual' | 'news' | 'article' | 'api' | 'evergreen';
   source_id: string | null;
-  status: 'draft' | 'queued' | 'posting' | 'posted' | 'failed' | 'cancelled';
+  status: 'draft' | 'queued' | 'posting' | 'posted' | 'partial' | 'failed' | 'cancelled';
   priority: number;
   queue_group: string | null;
   min_gap_minutes: number | null;
@@ -34,10 +34,32 @@ export interface SocialPost {
   scheduled_at: string | null;
   posted_at: string | null;
   platforms: string[] | null;
+  attempt_count: number;
+  next_attempt_at: string | null;
+  last_error: string | null;
+  blackout_exempt: number;
   created_by: string;
   created_at: string;
   updated_at: string;
   results: PostResult[];
+}
+
+export interface EvergreenItem {
+  id: number;
+  text_content: string;
+  twitter_text: string | null;
+  image_url: string | null;
+  link_url: string | null;
+  platforms: string[] | null;
+  cadence: 'daily' | 'weekly' | 'monthly';
+  preferred_time: string | null;
+  is_active: number;
+  times_used: number;
+  last_enqueued_at: string | null;
+  next_run_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PostResult {
@@ -127,6 +149,48 @@ export async function publishPost(token: string, id: number) {
     method: 'POST',
     body: JSON.stringify({ id }),
   });
+}
+
+// Evergreen API
+export async function getEvergreen(token: string) {
+  return apiFetch('/social/evergreen', token);
+}
+
+export async function createEvergreen(token: string, data: {
+  text_content: string;
+  twitter_text?: string;
+  image_url?: string;
+  link_url?: string;
+  platforms?: string[];
+  cadence?: string;
+  preferred_time?: string | null;
+  is_active?: boolean;
+}) {
+  return apiFetch('/social/evergreen', token, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateEvergreen(token: string, data: {
+  id: number;
+  text_content?: string;
+  twitter_text?: string | null;
+  image_url?: string | null;
+  link_url?: string | null;
+  platforms?: string[] | null;
+  cadence?: string;
+  preferred_time?: string | null;
+  is_active?: boolean;
+}) {
+  return apiFetch('/social/evergreen', token, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteEvergreen(token: string, id: number) {
+  return apiFetch(`/social/evergreen?id=${id}`, token, { method: 'DELETE' });
 }
 
 // Accounts API
