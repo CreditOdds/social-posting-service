@@ -337,7 +337,7 @@ sam deploy
 The checked-in [`api/samconfig.toml`](./api/samconfig.toml) targets:
 
 - stack: `CreditOddsSocialPostingService`
-- region: `us-east-2`
+- region: `us-east-1` (active region, co-located with the database inside the shared VPC; the us-east-2 stack is retired with its scheduler disabled)
 
 Deploys after the retry/evergreen upgrade must supply values (or accept blanks) for the new `SLACKWEBHOOKURL` and `ALARMEMAIL` parameters, and migrations 006–007 must be applied before the new scheduler goes live.
 
