@@ -237,8 +237,9 @@ Publishing behavior varies by platform:
 - Facebook: creates a page post, uses a photo post when an image exists, and places the link in a comment
 - Instagram: requires an image and uses the Graph API container/publish flow; links are added as comments
 - LinkedIn: generates a prefilled manual share URL instead of API posting (recorded as `pending_manual`)
+- Reddit: manual, like LinkedIn — generates a prefilled `reddit.com/r/<subreddit>/submit` URL (recorded as `pending_manual`; the UI shows a "Post now" link). The first line of the post text becomes the title, the rest the selftext body, with `link_url` appended; a title-only post with a link becomes a link post. Opt-in only: posts must explicitly list `reddit` in `platforms`, so the default fan-out never creates manual Reddit chores. Subreddit comes from `REDDIT_SUBREDDIT` (default `creditodds`).
 
-Reddit posting was removed: the Devvit + S3-feed approach never worked (Reddit never approved the Devvit app's external fetch domain), and a self-hosted Data API app is not available to a commercial brand. If Reddit is revisited, use a third-party scheduler that holds its own Reddit access (e.g. Postpone) or post manually.
+API-based Reddit posting stays removed: the Devvit + S3-feed approach never worked (Reddit never approved the Devvit app's external fetch domain), and a self-hosted Data API app is not available to a commercial brand — hence the prefilled-URL manual flow above.
 
 ## API Surface
 
@@ -339,7 +340,7 @@ The checked-in [`api/samconfig.toml`](./api/samconfig.toml) targets:
 - stack: `CreditOddsSocialPostingService`
 - region: `us-east-1` (active region, co-located with the database inside the shared VPC; the us-east-2 stack is retired with its scheduler disabled)
 
-Deploys after the retry/evergreen upgrade must supply values (or accept blanks) for the new `SLACKWEBHOOKURL` and `ALARMEMAIL` parameters, and migrations 006–007 must be applied before the new scheduler goes live.
+Deploys after the retry/evergreen upgrade must supply values (or accept blanks) for the new `SLACKWEBHOOKURL` and `ALARMEMAIL` parameters, and migrations 006–007 must be applied before the new scheduler goes live. Migration 008 (re-activate the `reddit` account row) must be applied before anything targets the manual Reddit platform — until then, reddit-only posts fail with "No active platforms".
 
 ## Known Gaps
 
