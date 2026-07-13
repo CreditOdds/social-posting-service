@@ -18,16 +18,19 @@ const { notify, preview } = require('./notify');
 
 const twitter = require('./platforms/twitter');
 const twitterCardwire = require('./platforms/twitter-cardwire');
+const reddit = require('./platforms/reddit');
 const facebook = require('./platforms/facebook');
 const instagram = require('./platforms/instagram');
 const linkedin = require('./platforms/linkedin');
 
-const platformModules = { twitter, twitter_cardwire: twitterCardwire, facebook, instagram, linkedin };
+const platformModules = { twitter, twitter_cardwire: twitterCardwire, reddit, facebook, instagram, linkedin };
 
 // Platforms that must be explicitly requested via the post's `platforms` list.
 // They are excluded from the default fan-out so general posts don't leak to
-// special-purpose accounts like @card_wire.
-const OPT_IN_ONLY_PLATFORMS = ['twitter_cardwire'];
+// special-purpose accounts like @card_wire, and so reddit — a manual platform
+// where every "publish" creates a human todo in the UI — only fires when a
+// producer deliberately targets it.
+const OPT_IN_ONLY_PLATFORMS = ['twitter_cardwire', 'reddit'];
 
 // Total publish attempts per post (first try + retries).
 const MAX_ATTEMPTS = 4;
