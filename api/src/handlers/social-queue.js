@@ -32,6 +32,17 @@ const DEFAULT_PRIORITY_BY_SOURCE = {
 // queue, so they get a priority well above any other source's default.
 const CARDWIRE_PRIORITY = 200;
 
+// Card-wire posts share a spacing group so a multi-card issuer campaign drips
+// out instead of firing as one burst. A single merge can carry several SUB
+// increases (2026-08-27: three Delta cards at once, all tweeted in the same
+// minute), and priority alone does not pace them. Jumping the queue is about
+// ORDER, not about publishing simultaneously.
+//
+// Defaults only: an explicit queue_group or min_gap_minutes from the caller
+// still wins, so a genuinely urgent single post can pass min_gap_minutes: 0.
+const CARDWIRE_QUEUE_GROUP = 'card-wire';
+const CARDWIRE_MIN_GAP_MINUTES = 30;
+
 // The @card_wire feed is the only producer of the opt-in-only twitter_cardwire
 // platform, so its presence uniquely identifies a card-wire post.
 function isCardwirePost(platforms) {
@@ -198,9 +209,10 @@ exports.handler = async (event) => {
       status: 'queued',
       scheduled_at: scheduledAt,
       platforms: platforms ? JSON.stringify(platforms) : null,
-      // Urgent-lane posts skip the blackout window and spacing gaps: card-wire
-      // always, publish_now so its retries also flow through fast, or the
-      // caller's explicit request.
+      // Urgent-lane posts skip the blackout window and the GLOBAL pacing gap:
+      // card-wire always, publish_now so its retries also flow through fast, or
+      // the caller's explicit request. They do NOT skip a per-post
+      // min_gap_minutes; see the scheduler's NEXT_ELIGIBLE_SQL.
       blackout_exempt: cardwire || publishNow || blackout_exempt === true ? 1 : 0,
       idempotency_key: idempotencyKey,
       created_by: 'system',
@@ -214,8 +226,17 @@ exports.handler = async (event) => {
       insertData.priority = DEFAULT_PRIORITY_BY_SOURCE[finalSourceType];
     }
 
-    if (parsedQueueGroup.provided) insertData.queue_group = parsedQueueGroup.value;
-    if (parsedMinGap.provided) insertData.min_gap_minutes = parsedMinGap.value;
+    if (parsedQueueGroup.provided) {
+      insertData.queue_group = parsedQueueGroup.value;
+    } else if (cardwire) {
+      insertData.queue_group = CARDWIRE_QUEUE_GROUP;
+    }
+
+    if (parsedMinGap.provided) {
+      insertData.min_gap_minutes = parsedMinGap.value;
+    } else if (cardwire) {
+      insertData.min_gap_minutes = CARDWIRE_MIN_GAP_MINUTES;
+    }
 
     let insertId;
     try {
