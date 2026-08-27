@@ -68,8 +68,19 @@ async function reapStuckPosts() {
 // MySQL rejects UPDATE ... JOIN ... ORDER BY ... LIMIT in this environment,
 // so first select the next eligible post, then claim it by id.
 //
-// blackout_exempt posts (card-wire, publish_now retries) skip both the
-// blackout window and the spacing gaps — they are the urgent lane.
+// blackout_exempt posts (card-wire, publish_now retries) are the urgent lane:
+// they skip the blackout window and the GLOBAL pacing gap, both of which are
+// general throttles meant for routine content.
+//
+// They do NOT skip a per-post min_gap_minutes. That column is an instruction
+// about one post's own spacing rather than general pacing, so honouring it
+// costs the urgent lane nothing when it is unset (NULL passes the check) and
+// is the only thing that stops a burst when it is set. Exempting it meant a
+// batch queued in the same second published in a single tick: on 2026-08-27
+// three Delta CardWire SUB increases were queued two seconds apart and all
+// three tweeted at once, because MAX_PUBLISHES_PER_TICK is 5 and nothing
+// else held them back.
+//
 // Per-post min_gap_minutes applies within the post's queue_group when one is
 // set, otherwise against the most recent post overall.
 const NEXT_ELIGIBLE_SQL = `
@@ -89,31 +100,30 @@ const NEXT_ELIGIBLE_SQL = `
   WHERE p.status = 'queued'
     AND (p.scheduled_at IS NULL OR p.scheduled_at <= NOW())
     AND (p.next_attempt_at IS NULL OR p.next_attempt_at <= NOW())
+    -- Blackout window: the urgent lane ignores it.
+    AND (p.blackout_exempt = 1 OR ? = 0)
+    -- Global pacing gap: the urgent lane ignores it too.
     AND (
       p.blackout_exempt = 1
+      OR ? = 0
+      OR overall_last.last_posted_at IS NULL
+      OR overall_last.last_posted_at <= DATE_SUB(NOW(), INTERVAL ? MINUTE)
+    )
+    -- Per-post gap: applies to EVERY post, urgent lane included.
+    AND (
+      p.min_gap_minutes IS NULL
       OR (
-        ? = 0
+        p.queue_group IS NOT NULL
         AND (
-          ? = 0
-          OR overall_last.last_posted_at IS NULL
-          OR overall_last.last_posted_at <= DATE_SUB(NOW(), INTERVAL ? MINUTE)
+          group_last.last_posted_at IS NULL
+          OR group_last.last_posted_at <= DATE_SUB(NOW(), INTERVAL p.min_gap_minutes MINUTE)
         )
+      )
+      OR (
+        p.queue_group IS NULL
         AND (
-          p.min_gap_minutes IS NULL
-          OR (
-            p.queue_group IS NOT NULL
-            AND (
-              group_last.last_posted_at IS NULL
-              OR group_last.last_posted_at <= DATE_SUB(NOW(), INTERVAL p.min_gap_minutes MINUTE)
-            )
-          )
-          OR (
-            p.queue_group IS NULL
-            AND (
-              overall_last.last_posted_at IS NULL
-              OR overall_last.last_posted_at <= DATE_SUB(NOW(), INTERVAL p.min_gap_minutes MINUTE)
-            )
-          )
+          overall_last.last_posted_at IS NULL
+          OR overall_last.last_posted_at <= DATE_SUB(NOW(), INTERVAL p.min_gap_minutes MINUTE)
         )
       )
     )
